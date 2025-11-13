@@ -434,5 +434,4 @@ describe('ConfigManager', () => {
 
   })
 
-
 })
