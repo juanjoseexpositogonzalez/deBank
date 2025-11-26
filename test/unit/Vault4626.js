@@ -21,10 +21,6 @@ describe('Vault4626', () => {
   })
 
   describe('Deployment', () => {
-    const name = 'Dapp University'
-    const symbol = 'DAPP'
-    const decimals = '18'
-    const totalSupply = tokens('1000000')
 
     it('returns correct assets', async () => {
 
