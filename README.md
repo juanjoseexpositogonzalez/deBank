@@ -58,7 +58,7 @@ Strategies (MockS1, MockS2, MockS3)
 - **Vault4626** (dBank): Main vault contract (in progress)
 - **StrategyRouter**: Capital routing and aggregation
 - **MockS1**: Virtual yield accumulator strategy
-- **ConfigManager**: Configuration management
+- **ConfigManager**: Centralized configuration management for all system parameters
 
 ## 🧪 Testing
 
