@@ -22,8 +22,10 @@ npm run coverage
 
 - **[Project Overview](./docs/PROJECT_OVERVIEW.md)** - Complete project introduction, features, and user guide
 - **[StrategyRouter Contract](./docs/CONTRACT_StrategyRouter.md)** - Detailed contract documentation
+- **[ConfigManager Contract](./docs/CONTRACT_ConfigManager.md)** - Configuration management system documentation
 - **[Low-Level Calls Annex](./docs/ANNEX_LowLevelCalls.md)** - Technical deep dive on low-level calls
 - **[MockS1 Flow Diagram](./docs/FLOW_MockS1.md)** - Visual flow diagrams for MockS1 strategy
+- **[Testing Strategy](./docs/TESTING_STRATEGY.md)** - Testing approach and patterns
 - **[Implementation Checklists](./docs/CHECKLIST_StrategyRouter.md)** - Development checklists
 
 ## 🏗️ Architecture
@@ -31,10 +33,16 @@ npm run coverage
 ```
 dBank Vault (ERC-4626)
     ↓
-StrategyRouter
+StrategyRouter ← ConfigManager
     ↓
 Strategies (MockS1, MockS2, MockS3)
 ```
+
+**Components**:
+- **dBank Vault**: Main user-facing contract (ERC-4626)
+- **StrategyRouter**: Routes capital to strategies
+- **ConfigManager**: Centralized configuration management
+- **Strategies**: Yield-generating contracts (MockS1, MockS2, MockS3)
 
 ## ✨ Features
 
