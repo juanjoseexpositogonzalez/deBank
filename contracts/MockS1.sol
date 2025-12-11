@@ -7,18 +7,21 @@ import { Token } from './Token.sol';
 // errors
 error MockS1__Paused();
 error MockS1__CapExceeded();
+error MockS1__InsufficientBalance();
 
 contract MockS1 {
+    // Constants
+    uint256 constant private SCALE = 1e18;
+    uint256 constant private YEAR = 365 * 24 * 3600;
     // State variables
     Token public token;    
     uint256 public principal;           // USDC assigned to this strategy
     uint256 public accumulator = 1e18;  // Growing factor
     int256 public aprBps;              // APR in basis points (500 -> 5%)
-    uint256 public lastAcrualsTs;      // Timestamp for the last update for accmulator
+    uint256 public lastAccrualTs;      // Timestamp for the last update for accumulator
     uint256 public cap;                // TVL max that S1 can manage
     bool public paused = false;        // Safety flag (true -> no deposits/withdrawals)
     address public owner;               // Owner of contract
-    uint256 public totalAssets;
 
 
     // Events
@@ -80,9 +83,9 @@ contract MockS1 {
         emit S1Paused(_paused);
     }
 
-    function setTotalAssets() onlyOwner external {
-        _accrue();
-        totalAssets = principal * accumulator;
+    function totalAssets() public view returns (uint256) {
+       uint256 accumulatorValue = _accrueView();
+       return (principal * accumulatorValue / SCALE);
     }
 
     function depositToStrategy(uint256 _amount) external {
@@ -92,40 +95,165 @@ contract MockS1 {
         
         principal += _amount;
 
+        uint256 totalAssetsAfter = principal * accumulator / SCALE;
+
+
         emit S1Deposited(
             _amount,
             principal,
-            totalAssets,
+            totalAssetsAfter,
             block.timestamp
         );
 
     }
     
     // internal
-    function _accrue() internal returns (bool success){
-        if (lastAcrualsTs == 0) {
-            lastAcrualsTs = block.timestamp;
-            accumulator = 1e18;
-            return true;
+    function _accrue() internal {
+        // 1. First use (initialize variables)
+        if (lastAccrualTs == 0) {
+            lastAccrualTs = block.timestamp;
+            accumulator = SCALE;
+            return;
         }
 
-        uint256 dt = block.timestamp - lastAcrualsTs;
+        // 2. Calculate seconds from last time
+        uint256 dt = block.timestamp - lastAccrualTs;
 
-        if (dt == 0) return true;
-        if (aprBps == 0) {
-            lastAcrualsTs = block.timestamp;
-            return true;
+        // 3. If no time has elapsed, return
+        if (dt == 0) return;
+
+        // 4. If no money invested, or no APR, just set the clock
+        if (aprBps == 0 || principal == 0) {
+            lastAccrualTs = block.timestamp;
+            return;
         }
 
-        uint256 aprBps_pos = uint256(aprBps > 0 ? aprBps : -aprBps);
+        // 5. Get the absolute value of aprBps (to handle sign)
+        uint256 absApr = 0;
+        int256 sign = 0;
+        if (aprBps > 0) {
+            absApr = uint256(aprBps);
+            sign = 1;            
+        } else {
+            absApr = uint256(-aprBps);
+            sign = -1;
+        }
+        
+        // 6. Calculate the lineal factor per second in 1e18 scale
+        uint256 ratePerSecondScaled = absApr * SCALE /(10_000 * YEAR);
 
-        uint256 factor = aprBps > 0 ? 1 + aprBps_pos/10_000 * dt / 365: 1 - aprBps_pos/10_000 * dt / 365;
+        // 7. Calculate how much the factor changes per dt seconds:
+        uint256 deltaScaled = ratePerSecondScaled * dt;
 
-        accumulator *= factor;
-        lastAcrualsTs = block.timestamp;
+        // 8. Build factor with 1e18 scale
+        uint256 factor;
+        if (sign == 1){
+            factor = SCALE + deltaScaled;
+        } else {
+            if (SCALE < deltaScaled) {
+                factor = 0;
+            } else {
+                factor = SCALE - deltaScaled;
+            }
+            
+        }
+        // 9. Update accumulator
+        accumulator = accumulator * uint256(factor) / SCALE;
 
-        return true;
+        lastAccrualTs = block.timestamp;
+    }
 
+    function _accrueView() internal view returns (uint256) {
+        // 1. If no money invested, or no APR, just set the clock
+        if (lastAccrualTs == 0) return SCALE;
+
+        if (aprBps == 0 || principal == 0) return accumulator;
+
+        // 2. Calculate seconds from last time
+        uint256 dt = block.timestamp - lastAccrualTs;
+
+        // 3. If no time has elapsed, return
+        if (dt == 0) return accumulator;
+
+
+        // 5. Get the absolute value of aprBps (to handle sign)
+        uint256 absApr = 0;
+        int256 sign = 0;
+        if (aprBps > 0) {
+            absApr = uint256(aprBps);
+            sign = 1;            
+        } else {
+            absApr = uint256(-aprBps);
+            sign = -1;
+        }
+        
+        // 6. Calculate the lineal factor per second in 1e18 scale
+        uint256 ratePerSecondScaled = absApr * SCALE /(10_000 * YEAR);
+
+        // 7. Calculate how much the factor changes per dt seconds:
+        uint256 deltaScaled = ratePerSecondScaled * dt;
+
+        // 8. Build factor with 1e18 scale
+        uint256 factor;
+        if (sign == 1){
+            factor = SCALE + deltaScaled;
+        } else {
+            if (SCALE < deltaScaled) {
+                factor = 0;
+            } else {
+                factor = SCALE - deltaScaled;
+            }
+            
+        }
+        return accumulator * factor / SCALE;
+    }
+
+    function withdrawFromStrategy(uint256 _amount) external {
+        // 1. Verify paused
+        if(paused) revert MockS1__Paused();
+        // 2. Accrue interest
+        _accrue();
+        // 3. Verify sufficient balance
+        uint256 currentTotalAssets = principal * accumulator / SCALE;
+        if(_amount > currentTotalAssets) revert MockS1__InsufficientBalance();
+        
+        // 4. Calculate the new principal
+        uint256 principalToReduce = (_amount * SCALE) / accumulator;
+
+        // 5. Update principal
+        principal -= principalToReduce;
+
+        uint256 totalAssetsAfter = principal * accumulator / SCALE;
+
+        emit S1Withdrawn(
+            _amount , 
+            principal,
+            totalAssetsAfter,
+            block.timestamp
+        );
+    }
+
+    function report() onlyOwner external {
+        // 0. Previous verifications
+        if(paused) revert MockS1__Paused();
+        if(principal == 0) revert MockS1__InsufficientBalance();
+        if(aprBps == 0) revert MockS1__InsufficientBalance();
+        // No yield yet
+        if(accumulator == SCALE) revert MockS1__InsufficientBalance();
+        // 1. Call _accrue() to update the accumulator
+        _accrue();
+        // 2. Calculate totalAssets
+        uint256 currentTotalAssets = principal * accumulator / SCALE;
+        // 3. Calculate gain
+        uint256 gain = currentTotalAssets - principal;
+        // 4. Update principal
+        principal = currentTotalAssets;
+        // 5. Reset accumulator
+        accumulator = SCALE;
+        // 6. Update lastAccrualTs
+        lastAccrualTs = block.timestamp;
+        // 7. Emit event
+        emit S1Reported(gain, principal, block.timestamp);
     }
 
 }
