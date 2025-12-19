@@ -276,4 +276,98 @@ contract ConfigManager {
         return true;
     }
 
+    function setFeeRecipient(address _newFeeRecipient) external onlyOwner returns(bool success) {
+        if(_newFeeRecipient == address(0)) revert ConfigManager__zeroAddress(FEE_RECIPIENT);
+
+        address _oldFeeRecipient = feeRecipient;
+
+        feeRecipient = _newFeeRecipient;
+
+        emit AddressUpdated(
+            FEE_RECIPIENT,
+            _oldFeeRecipient,
+            _newFeeRecipient
+        );
+
+        return true;
+    }
+
+    function setPrimaryOracle(address _newPrimaryOracle) external onlyOwner returns(bool success) {
+        if(_newPrimaryOracle == address(0)) revert ConfigManager__zeroAddress(PRIMARY_ORACLE);
+
+        address _oldPrimaryOracle = primaryOracle;
+
+        primaryOracle = _newPrimaryOracle;
+
+        emit AddressUpdated(
+            PRIMARY_ORACLE,
+            _oldPrimaryOracle,
+            _newPrimaryOracle
+        );
+
+        return true;
+    }
+
+    function setPauser(address _newPauser) external onlyOwner returns(bool success) {
+        if(_newPauser == address(0)) revert ConfigManager__zeroAddress(ROLE_PAUSER);
+
+        address _oldPauser = pauser;
+
+        pauser = _newPauser;
+
+        emit AddressUpdated(
+            ROLE_PAUSER,
+            _oldPauser,
+            _newPauser
+        );
+
+        return true;
+    }
+
+    function setHarvester(address _newHarvester) external onlyOwner returns(bool success) {
+        if(_newHarvester == address(0)) revert ConfigManager__zeroAddress(ROLE_HARVESTER);
+
+        address _oldHarvester = harvester;
+
+        harvester = _newHarvester;
+
+        emit AddressUpdated(
+            ROLE_HARVESTER,
+            _oldHarvester,
+            _newHarvester
+        );
+
+        return true;
+    }
+
+    function setAllocator(address _newAllocator) external onlyOwner returns(bool success) {
+        if(_newAllocator == address(0)) revert ConfigManager__zeroAddress(ROLE_ALLOCATOR);
+
+        address _oldAllocator = allocator;
+
+        allocator = _newAllocator;
+
+        emit AddressUpdated(
+            ROLE_ALLOCATOR,
+            _oldAllocator,
+            _newAllocator
+        );
+
+        return true;
+    }
+
+    function addAllowedVenue(address _venue) external onlyOwner returns(bool success) {
+        if(_venue == address(0)) revert ConfigManager__zeroAddress(keccak256("ALLOWED_VENUE"));
+
+        allowedVenues.push(_venue);
+
+        emit AddressUpdated(
+            keccak256("ALLOWED_VENUE"),
+            address(0),
+            _venue
+        );
+
+        return true;
+    }
+
 }
