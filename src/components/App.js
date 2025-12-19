@@ -1,13 +1,22 @@
 import { useEffect, useState } from 'react'
 import { useDispatch } from 'react-redux'
 import { Container } from 'react-bootstrap'
-import { ethers } from 'ethers'
+// import { ethers } from 'ethers'
 
 // Components
 import Navigation from './Navigation';
-import Loading from './Loading';
+// import Loading from './Loading';
 
-import { loadAccount, loadProvider, loadNetwork } from '../store/interactions'
+import { 
+  loadAccount,
+  loadProvider,
+  loadNetwork,
+  loadTokens,  
+  loadBank,
+  loadStrategyRouter,
+  loadMockS1,
+  loadConfigManager,
+} from '../store/interactions'
 
 // ABIs: Import your contract ABIs here
 // import TOKEN_ABI from '../abis/Token.json'
@@ -24,17 +33,22 @@ function App() {
     // Initiate provider
     const provider = loadProvider(dispatch)
     
+    const chainId = await loadNetwork(provider, dispatch)
+    
     // Fetch accounts
     await loadAccount(dispatch)
 
-    // Fetch network data
-    const chainId = await loadNetwork(provider, dispatch)
-    
+    // Initialize contracts
+    await loadTokens(provider, chainId, dispatch)
+    await loadBank(provider, chainId, dispatch)
+    await loadStrategyRouter(provider, chainId, dispatch)
+    await loadMockS1(provider, chainId, dispatch)
+    await loadConfigManager(provider, chainId, dispatch)
   }
 
   useEffect(() => {
     loadBlockchainData()
-  }, []);
+  }, [loadBlockchainData()]);
 
   return(
     <Container>

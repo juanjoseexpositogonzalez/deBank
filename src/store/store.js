@@ -1,10 +1,20 @@
 import { configureStore } from "@reduxjs/toolkit";
 
 import provider from './reducers/provider';
+import tokens from './reducers/tokens';
+import dBank from './reducers/dBank';
+import strategyRouter from './reducers/strategyRouter';
+import mockS1 from './reducers/mockS1';
+import configManager from './reducers/configManager';
 
 export const store = configureStore({
   reducer: {
-    provider
+    provider,
+    tokens,
+    dBank,
+    strategyRouter,
+    mockS1,
+    configManager,
   },
   middleware: (getDefaultMiddleware) => 
     getDefaultMiddleware({
