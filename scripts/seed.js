@@ -5,7 +5,6 @@
 // Requires environment variables or parameters with deployed contract addresses
 
 require("dotenv").config();
-const hre = require("hardhat");
 const { ethers } = require("hardhat");
 
 // Helper to parse tokens
@@ -24,6 +23,11 @@ const tokens = (n) => {
     return ethers.utils.parseUnits(n.toString(), tokenDecimals);
 };
 
+// Helper for ConfigManager values (uses 6 decimals, not token decimals)
+const tokens6 = (n) => {
+    return ethers.utils.parseUnits(n.toString(), 6);
+};
+
 async function main() {
     const [deployer, ...users] = await ethers.getSigners();
     console.log("Running seed with account:", deployer.address);
@@ -38,13 +42,14 @@ async function main() {
     const DBANK_ADDRESS = process.env.DBANK_ADDRESS || process.argv[3];
     const STRATEGY_ROUTER_ADDRESS = process.env.STRATEGY_ROUTER_ADDRESS || process.argv[4];
     const CONFIG_MANAGER_ADDRESS = process.env.CONFIG_MANAGER_ADDRESS || process.argv[5];
+    const MOCKS1_ADDRESS = process.env.MOCKS1_ADDRESS || process.argv[6]; // Optional
 
     if (!TOKEN_ADDRESS || !DBANK_ADDRESS || !STRATEGY_ROUTER_ADDRESS || !CONFIG_MANAGER_ADDRESS) {
         console.error("ERROR: Missing contract addresses.");
         console.error("Use environment variables or pass addresses as arguments:");
-        console.error("  TOKEN_ADDRESS=<addr> DBANK_ADDRESS=<addr> STRATEGY_ROUTER_ADDRESS=<addr> CONFIG_MANAGER_ADDRESS=<addr> npx hardhat run scripts/seed.js --network <network>");
+        console.error("  TOKEN_ADDRESS=<addr> DBANK_ADDRESS=<addr> STRATEGY_ROUTER_ADDRESS=<addr> CONFIG_MANAGER_ADDRESS=<addr> [MOCKS1_ADDRESS=<addr>] npx hardhat run scripts/seed.js --network <network>");
         console.error("Or:");
-        console.error("  npx hardhat run scripts/seed.js --network <network> <token> <dbank> <router> <config>");
+        console.error("  npx hardhat run scripts/seed.js --network <network> <token> <dbank> <router> <config> [mockS1]");
         process.exit(1);
     }
 
@@ -52,7 +57,11 @@ async function main() {
     console.log(`  Token:              ${TOKEN_ADDRESS}`);
     console.log(`  dBank:              ${DBANK_ADDRESS}`);
     console.log(`  StrategyRouter:     ${STRATEGY_ROUTER_ADDRESS}`);
-    console.log(`  ConfigManager:      ${CONFIG_MANAGER_ADDRESS}\n`);
+    console.log(`  ConfigManager:      ${CONFIG_MANAGER_ADDRESS}`);
+    if (MOCKS1_ADDRESS) {
+        console.log(`  MockS1:             ${MOCKS1_ADDRESS}`);
+    }
+    console.log();
 
     // ============================================================
     // Get contract instances
@@ -60,10 +69,19 @@ async function main() {
     const Token = await ethers.getContractFactory('Token');
     const dBank = await ethers.getContractFactory('dBank');
     const StrategyRouter = await ethers.getContractFactory('StrategyRouter');
+    const ConfigManager = await ethers.getContractFactory('ConfigManager');
+    const MockS1 = await ethers.getContractFactory('MockS1');
 
     const token = Token.attach(TOKEN_ADDRESS);
     const dbank = dBank.attach(DBANK_ADDRESS);
     const strategyRouter = StrategyRouter.attach(STRATEGY_ROUTER_ADDRESS);
+    const configManager = ConfigManager.attach(CONFIG_MANAGER_ADDRESS);
+    
+    // Attach MockS1 if address provided
+    let mockS1 = null;
+    if (MOCKS1_ADDRESS) {
+        mockS1 = MockS1.attach(MOCKS1_ADDRESS);
+    }
 
     // Get token decimals
     tokenDecimals = await getTokenDecimals(token);
@@ -76,6 +94,18 @@ async function main() {
     const PERFORMANCE_FEE_BPS = 2500; // 25% (2500 bps)
     const TVL_CAP = tokens(100000); // 100K tokens
     const PER_TX_CAP = tokens(5000); // 5K tokens per transaction
+
+    // ConfigManager parameters (uses 6 decimals format: e6)
+    const CONFIG_LIQUIDITY_BUFFER_BPS = 1200; // 12%
+    const CONFIG_MAX_SLIPPAGE_BPS = 30; // 0.3%
+    const CONFIG_TVL_GLOBAL_CAP = tokens6(100000); // 100K tokens (100000e6)
+    const CONFIG_PER_TX_CAP = tokens6(5000); // 5K tokens (5000e6)
+    const CONFIG_PERFORMANCE_FEE_BPS = 2500; // 25% (2500 bps)
+    const CONFIG_EPOCH_DURATION = 7; // 7 days
+    const CONFIG_SETTLEMENT_WINDOW_UTC = 12 * 3600; // 12 hours in seconds
+    const CONFIG_STRATEGY_CAP_S1 = tokens6(100000); // 100K tokens (100000e6)
+    const CONFIG_STRATEGY_CAP_S2 = tokens6(50000); // 50K tokens (50000e6)
+    const CONFIG_STRATEGY_CAP_S3 = tokens6(25000); // 25K tokens (25000e6)
 
     // Amounts to fund test accounts
     const USER_BALANCE = tokens(100000); // 100K tokens per user
@@ -139,6 +169,188 @@ async function main() {
         } else {
             console.log(`  ✓ User ${i + 1} already has sufficient allowance\n`);
         }
+    }
+
+    console.log("==========================================");
+    console.log("STEP 2.5: Configure ConfigManager (Owner)");
+    console.log("==========================================\n");
+
+    // Verify that deployer is the ConfigManager owner
+    const configManagerOwner = await configManager.owner();
+    if (configManagerOwner.toLowerCase() !== deployer.address.toLowerCase()) {
+        console.log(`  ⚠ Warning: Deployer (${deployer.address}) is not the ConfigManager owner (${configManagerOwner})`);
+        console.log(`    ConfigManager configuration will be skipped.\n`);
+    } else {
+        console.log(`  ✓ Deployer is ConfigManager owner\n`);
+
+        // Configure liquidityBufferBps
+        const currentLiquidityBufferBps = await configManager.liquidityBufferBps();
+        if (currentLiquidityBufferBps.toString() !== CONFIG_LIQUIDITY_BUFFER_BPS.toString()) {
+            console.log(`  Configuring liquidityBufferBps to ${CONFIG_LIQUIDITY_BUFFER_BPS} (${CONFIG_LIQUIDITY_BUFFER_BPS / 100}%)...`);
+            const tx = await configManager.setLiquidityBufferBps(CONFIG_LIQUIDITY_BUFFER_BPS);
+            await tx.wait();
+            console.log(`  ✓ liquidityBufferBps configured\n`);
+        } else {
+            console.log(`  ✓ liquidityBufferBps already configured correctly\n`);
+        }
+
+        // Configure maxSlippageBps
+        const currentMaxSlippageBps = await configManager.maxSlippageBps();
+        if (currentMaxSlippageBps.toString() !== CONFIG_MAX_SLIPPAGE_BPS.toString()) {
+            console.log(`  Configuring maxSlippageBps to ${CONFIG_MAX_SLIPPAGE_BPS} (${CONFIG_MAX_SLIPPAGE_BPS / 10}%)...`);
+            const tx = await configManager.setMaxSlippageBps(CONFIG_MAX_SLIPPAGE_BPS);
+            await tx.wait();
+            console.log(`  ✓ maxSlippageBps configured\n`);
+        } else {
+            console.log(`  ✓ maxSlippageBps already configured correctly\n`);
+        }
+
+        // Configure tvlGlobalCap
+        const currentTvlGlobalCap = await configManager.tvlGlobalCap();
+        if (!currentTvlGlobalCap.eq(CONFIG_TVL_GLOBAL_CAP)) {
+            console.log(`  Configuring tvlGlobalCap to ${ethers.utils.formatUnits(CONFIG_TVL_GLOBAL_CAP, 6)} tokens...`);
+            const tx = await configManager.setTvlGlobalCap(CONFIG_TVL_GLOBAL_CAP);
+            await tx.wait();
+            console.log(`  ✓ tvlGlobalCap configured\n`);
+        } else {
+            console.log(`  ✓ tvlGlobalCap already configured correctly\n`);
+        }
+
+        // Configure perTxCap
+        const currentConfigPerTxCap = await configManager.perTxCap();
+        if (!currentConfigPerTxCap.eq(CONFIG_PER_TX_CAP)) {
+            console.log(`  Configuring perTxCap to ${ethers.utils.formatUnits(CONFIG_PER_TX_CAP, 6)} tokens...`);
+            const tx = await configManager.setPerTxCap(CONFIG_PER_TX_CAP);
+            await tx.wait();
+            console.log(`  ✓ perTxCap configured\n`);
+        } else {
+            console.log(`  ✓ perTxCap already configured correctly\n`);
+        }
+
+        // Configure performanceFeeBps
+        const currentConfigPerformanceFeeBps = await configManager.performanceFeeBps();
+        if (currentConfigPerformanceFeeBps.toString() !== CONFIG_PERFORMANCE_FEE_BPS.toString()) {
+            console.log(`  Configuring performanceFeeBps to ${CONFIG_PERFORMANCE_FEE_BPS} (${CONFIG_PERFORMANCE_FEE_BPS / 100}%)...`);
+            const tx = await configManager.setPerformanceFeeBps(CONFIG_PERFORMANCE_FEE_BPS);
+            await tx.wait();
+            console.log(`  ✓ performanceFeeBps configured\n`);
+        } else {
+            console.log(`  ✓ performanceFeeBps already configured correctly\n`);
+        }
+
+        // Configure epochDuration
+        const currentEpochDuration = await configManager.epochDuration();
+        if (currentEpochDuration.toString() !== CONFIG_EPOCH_DURATION.toString()) {
+            console.log(`  Configuring epochDuration to ${CONFIG_EPOCH_DURATION} days...`);
+            const tx = await configManager.setEpochDuration(CONFIG_EPOCH_DURATION);
+            await tx.wait();
+            console.log(`  ✓ epochDuration configured\n`);
+        } else {
+            console.log(`  ✓ epochDuration already configured correctly\n`);
+        }
+
+        // Configure settlementWindowUTC
+        const currentSettlementWindowUTC = await configManager.settlementWindowUTC();
+        if (currentSettlementWindowUTC.toString() !== CONFIG_SETTLEMENT_WINDOW_UTC.toString()) {
+            console.log(`  Configuring settlementWindowUTC to ${CONFIG_SETTLEMENT_WINDOW_UTC} seconds (${CONFIG_SETTLEMENT_WINDOW_UTC / 3600} hours)...`);
+            const tx = await configManager.setSettlementWindowUTC(CONFIG_SETTLEMENT_WINDOW_UTC);
+            await tx.wait();
+            console.log(`  ✓ settlementWindowUTC configured\n`);
+        } else {
+            console.log(`  ✓ settlementWindowUTC already configured correctly\n`);
+        }
+
+        // Configure strategyCapS1
+        const currentStrategyCapS1 = await configManager.strategyCapS1();
+        if (!currentStrategyCapS1.eq(CONFIG_STRATEGY_CAP_S1)) {
+            console.log(`  Configuring strategyCapS1 to ${ethers.utils.formatUnits(CONFIG_STRATEGY_CAP_S1, 6)} tokens...`);
+            const tx = await configManager.setStrategyCapS1(CONFIG_STRATEGY_CAP_S1);
+            await tx.wait();
+            console.log(`  ✓ strategyCapS1 configured\n`);
+        } else {
+            console.log(`  ✓ strategyCapS1 already configured correctly\n`);
+        }
+
+        // Configure strategyCapS2
+        const currentStrategyCapS2 = await configManager.strategyCapS2();
+        if (!currentStrategyCapS2.eq(CONFIG_STRATEGY_CAP_S2)) {
+            console.log(`  Configuring strategyCapS2 to ${ethers.utils.formatUnits(CONFIG_STRATEGY_CAP_S2, 6)} tokens...`);
+            const tx = await configManager.setStrategyCapS2(CONFIG_STRATEGY_CAP_S2);
+            await tx.wait();
+            console.log(`  ✓ strategyCapS2 configured\n`);
+        } else {
+            console.log(`  ✓ strategyCapS2 already configured correctly\n`);
+        }
+
+        // Configure strategyCapS3
+        const currentStrategyCapS3 = await configManager.strategyCapS3();
+        if (!currentStrategyCapS3.eq(CONFIG_STRATEGY_CAP_S3)) {
+            console.log(`  Configuring strategyCapS3 to ${ethers.utils.formatUnits(CONFIG_STRATEGY_CAP_S3, 6)} tokens...`);
+            const tx = await configManager.setStrategyCapS3(CONFIG_STRATEGY_CAP_S3);
+            await tx.wait();
+            console.log(`  ✓ strategyCapS3 configured\n`);
+        } else {
+            console.log(`  ✓ strategyCapS3 already configured correctly\n`);
+        }
+
+        // Configure feeRecipient (use deployer/owner)
+        const currentConfigFeeRecipient = await configManager.feeRecipient();
+        if (currentConfigFeeRecipient === ethers.constants.AddressZero || currentConfigFeeRecipient.toLowerCase() !== deployer.address.toLowerCase()) {
+            console.log(`  Configuring feeRecipient to ${deployer.address}...`);
+            const tx = await configManager.setFeeRecipient(deployer.address);
+            await tx.wait();
+            console.log(`  ✓ feeRecipient configured\n`);
+        } else {
+            console.log(`  ✓ feeRecipient already configured correctly\n`);
+        }
+
+        // Configure primaryOracle (use deployer/owner)
+        const currentPrimaryOracle = await configManager.primaryOracle();
+        if (currentPrimaryOracle === ethers.constants.AddressZero || currentPrimaryOracle.toLowerCase() !== deployer.address.toLowerCase()) {
+            console.log(`  Configuring primaryOracle to ${deployer.address}...`);
+            const tx = await configManager.setPrimaryOracle(deployer.address);
+            await tx.wait();
+            console.log(`  ✓ primaryOracle configured\n`);
+        } else {
+            console.log(`  ✓ primaryOracle already configured correctly\n`);
+        }
+
+        // Configure pauser (use deployer/owner)
+        const currentPauser = await configManager.pauser();
+        if (currentPauser === ethers.constants.AddressZero || currentPauser.toLowerCase() !== deployer.address.toLowerCase()) {
+            console.log(`  Configuring pauser to ${deployer.address}...`);
+            const tx = await configManager.setPauser(deployer.address);
+            await tx.wait();
+            console.log(`  ✓ pauser configured\n`);
+        } else {
+            console.log(`  ✓ pauser already configured correctly\n`);
+        }
+
+        // Configure harvester (use deployer/owner)
+        const currentHarvester = await configManager.harvester();
+        if (currentHarvester === ethers.constants.AddressZero || currentHarvester.toLowerCase() !== deployer.address.toLowerCase()) {
+            console.log(`  Configuring harvester to ${deployer.address}...`);
+            const tx = await configManager.setHarvester(deployer.address);
+            await tx.wait();
+            console.log(`  ✓ harvester configured\n`);
+        } else {
+            console.log(`  ✓ harvester already configured correctly\n`);
+        }
+
+        // Configure allocator (use deployer/owner)
+        const currentAllocator = await configManager.allocator();
+        if (currentAllocator === ethers.constants.AddressZero || currentAllocator.toLowerCase() !== deployer.address.toLowerCase()) {
+            console.log(`  Configuring allocator to ${deployer.address}...`);
+            const tx = await configManager.setAllocator(deployer.address);
+            await tx.wait();
+            console.log(`  ✓ allocator configured\n`);
+        } else {
+            console.log(`  ✓ allocator already configured correctly\n`);
+        }
+
+        // Note: allowedVenues can be added via addAllowedVenue if needed
+        // For now, we'll leave it empty as it's not critical for initial setup
+        console.log(`  allowedVenues: Will remain empty for now (can be added later if needed)\n`);
     }
 
     console.log("==========================================");
@@ -219,6 +431,95 @@ async function main() {
     }
 
     console.log("==========================================");
+    console.log("STEP 3.5: Verify StrategyRouter Configuration");
+    console.log("==========================================\n");
+
+    // Verify StrategyRouter owner
+    const routerOwner = await strategyRouter.owner();
+    if (routerOwner.toLowerCase() !== deployer.address.toLowerCase()) {
+        console.log(`  ⚠ Warning: Deployer (${deployer.address}) is not the StrategyRouter owner (${routerOwner})`);
+        console.log(`    Some operations may require the owner account.\n`);
+    } else {
+        console.log(`  ✓ Deployer is StrategyRouter owner\n`);
+    }
+
+    // Check registered strategies
+    const totalStrategies = await strategyRouter.totalStrategies();
+    console.log(`  Total registered strategies: ${totalStrategies}`);
+
+    if (totalStrategies === 0) {
+        console.log(`  ⚠ Warning: No strategies registered in StrategyRouter!`);
+        console.log(`    Strategies should be registered during deployment.`);
+        console.log(`    Expected: MockS1 (Strategy ID 1) should be registered.\n`);
+    } else {
+        // Check strategy S1 (MockS1)
+        const strategy1Info = await strategyRouter.getStrategy(1);
+        if (strategy1Info.strategy === ethers.constants.AddressZero) {
+            console.log(`  ⚠ Warning: Strategy S1 (ID 1) is not registered\n`);
+        } else {
+            console.log(`  ✓ Strategy S1 (ID 1) is registered:`);
+            console.log(`    Address: ${strategy1Info.strategy}`);
+            console.log(`    Active: ${strategy1Info.active}`);
+            console.log(`    Cap: ${ethers.utils.formatEther(strategy1Info.cap)} tokens`);
+            console.log(`    Allocated: ${ethers.utils.formatEther(strategy1Info.allocated)} tokens`);
+            
+            // Get MockS1 address from router if not provided
+            const mockS1Address = MOCKS1_ADDRESS || strategy1Info.strategy;
+            
+            // If we don't have mockS1 instance yet, create it
+            if (!mockS1 && mockS1Address) {
+                mockS1 = MockS1.attach(mockS1Address);
+                console.log(`    ✓ Attached to MockS1 at ${mockS1Address}`);
+            }
+            
+            // Check MockS1 state if we have the instance
+            if (mockS1) {
+                try {
+                    const [aprBps, cap, paused, principal] = await mockS1.params();
+                    const accumulator = await mockS1.accumulator();
+                    const totalAssets = await mockS1.totalAssets();
+                    
+                    console.log(`    MockS1 state:`);
+                    console.log(`      APR: ${aprBps.toString()} bps (${aprBps.toNumber() / 100}%)`);
+                    console.log(`      Cap: ${ethers.utils.formatEther(cap)} tokens`);
+                    console.log(`      Paused: ${paused}`);
+                    console.log(`      Principal: ${ethers.utils.formatEther(principal)} tokens`);
+                    console.log(`      Accumulator: ${ethers.utils.formatEther(accumulator)}`);
+                    console.log(`      Total Assets: ${ethers.utils.formatEther(totalAssets)} tokens`);
+                    
+                    // Verify address matches
+                    if (MOCKS1_ADDRESS && strategy1Info.strategy.toLowerCase() !== MOCKS1_ADDRESS.toLowerCase()) {
+                        console.log(`    ⚠ Warning: Registered address (${strategy1Info.strategy}) does not match provided MockS1 address (${MOCKS1_ADDRESS})`);
+                    }
+                } catch (error) {
+                    console.log(`    ⚠ Could not read MockS1 params: ${error.message}`);
+                }
+            }
+            console.log();
+        }
+
+        // Check for other strategies (S2, S3)
+        for (let i = 2; i <= 3; i++) {
+            const strategyInfo = await strategyRouter.getStrategy(i);
+            if (strategyInfo.strategy !== ethers.constants.AddressZero) {
+                console.log(`  Strategy S${i} (ID ${i}):`);
+                console.log(`    Address: ${strategyInfo.strategy}`);
+                console.log(`    Active: ${strategyInfo.active}`);
+                console.log(`    Cap: ${ethers.utils.formatEther(strategyInfo.cap)} tokens`);
+                console.log(`    Allocated: ${ethers.utils.formatEther(strategyInfo.allocated)} tokens\n`);
+            }
+        }
+    }
+
+    // Check router's token balance and allowance
+    const routerBalance = await token.balanceOf(STRATEGY_ROUTER_ADDRESS);
+    console.log(`  StrategyRouter token balance: ${ethers.utils.formatEther(routerBalance)} tokens`);
+
+    // Check if vault has approved router (if needed for future operations)
+    const vaultRouterAllowance = await token.allowance(DBANK_ADDRESS, STRATEGY_ROUTER_ADDRESS);
+    console.log(`  Vault's allowance to router: ${ethers.utils.formatEther(vaultRouterAllowance)} tokens\n`);
+
+    console.log("==========================================");
     console.log("STEP 4: Initial Deposits");
     console.log("==========================================\n");
 
@@ -282,6 +583,14 @@ async function main() {
     console.log(`  router.totalAssets: ${ethers.utils.formatEther(routerAssets)} tokens`);
     console.log(`  pricePerShare:     ${ethers.utils.formatEther(pricePerShare)} (1e18 = 1.0)`);
 
+    // StrategyRouter state
+    const routerTotalStrategies = await strategyRouter.totalStrategies();
+    const routerTotalAllocated = await strategyRouter.getTotalAllocated();
+    console.log(`\nStrategyRouter State:`);
+    console.log(`  totalStrategies:  ${routerTotalStrategies}`);
+    console.log(`  totalAllocated:   ${ethers.utils.formatEther(routerTotalAllocated)} tokens`);
+    console.log(`  routerBalance:    ${ethers.utils.formatEther(await token.balanceOf(STRATEGY_ROUTER_ADDRESS))} tokens`);
+
     // Validation: totalAssets ≈ buffer + router.totalAssets()
     const expectedTotalAssets = buffer.add(routerAssets);
     const diff = totalAssets.sub(expectedTotalAssets).abs();
@@ -325,6 +634,32 @@ async function main() {
     console.log(`  tvlCap:            ${ethers.utils.formatEther(tvlCap)} tokens`);
     console.log(`  perTxCap:          ${ethers.utils.formatEther(perTxCap)} tokens`);
     console.log(`  paused:            ${paused ? 'Yes' : 'No'}`);
+
+    // ConfigManager configuration summary
+    const configLiquidityBufferBps = await configManager.liquidityBufferBps();
+    const configMaxSlippageBps = await configManager.maxSlippageBps();
+    const configTvlGlobalCap = await configManager.tvlGlobalCap();
+    const configPerTxCap = await configManager.perTxCap();
+    const configPerformanceFeeBps = await configManager.performanceFeeBps();
+    const configEpochDuration = await configManager.epochDuration();
+    const configSettlementWindowUTC = await configManager.settlementWindowUTC();
+    const configStrategyCapS1 = await configManager.strategyCapS1();
+    const configStrategyCapS2 = await configManager.strategyCapS2();
+    const configStrategyCapS3 = await configManager.strategyCapS3();
+    const configFeeRecipient = await configManager.feeRecipient();
+
+    console.log("\nConfigManager Configuration:");
+    console.log(`  liquidityBufferBps: ${configLiquidityBufferBps} (${configLiquidityBufferBps / 100}%)`);
+    console.log(`  maxSlippageBps:     ${configMaxSlippageBps} (${configMaxSlippageBps / 10}%)`);
+    console.log(`  tvlGlobalCap:       ${ethers.utils.formatUnits(configTvlGlobalCap, 6)} tokens`);
+    console.log(`  perTxCap:           ${ethers.utils.formatUnits(configPerTxCap, 6)} tokens`);
+    console.log(`  performanceFeeBps:  ${configPerformanceFeeBps} (${configPerformanceFeeBps / 100}%)`);
+    console.log(`  epochDuration:     ${configEpochDuration} days`);
+    console.log(`  settlementWindowUTC: ${configSettlementWindowUTC} seconds (${configSettlementWindowUTC / 3600} hours)`);
+    console.log(`  strategyCapS1:      ${ethers.utils.formatUnits(configStrategyCapS1, 6)} tokens`);
+    console.log(`  strategyCapS2:      ${ethers.utils.formatUnits(configStrategyCapS2, 6)} tokens`);
+    console.log(`  strategyCapS3:      ${ethers.utils.formatUnits(configStrategyCapS3, 6)} tokens`);
+    console.log(`  feeRecipient:       ${configFeeRecipient || 'Not set'}`);
 
     console.log("\n==========================================");
     console.log("✓ SEED COMPLETED");
