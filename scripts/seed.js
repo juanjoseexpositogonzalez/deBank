@@ -6,6 +6,7 @@
 
 require("dotenv").config();
 const { ethers } = require("hardhat");
+const config = require("../src/config.json");
 
 // Helper to parse tokens
 // We'll get token decimals dynamically
@@ -30,19 +31,33 @@ const tokens6 = (n) => {
 
 async function main() {
     const [deployer, ...users] = await ethers.getSigners();
-    console.log("Running seed with account:", deployer.address);
+    const network = hre.network.name;
+    const { chainId } = await ethers.provider.getNetwork();
+    const isSepolia = network === "sepolia" || chainId === 11155111;
+
+    console.log(`Running seed on network: ${network} (chainId=${chainId})`);
+    console.log("With account:", deployer.address);
     console.log("Account balance:", ethers.utils.formatEther(await deployer.getBalance()), "ETH\n");
 
     // ============================================================
     // Configuration: Deployed contract addresses
     // ============================================================
-    // Addresses can come from environment variables or be passed as arguments
-    // By default, we try to get them from process.env
-    const TOKEN_ADDRESS = process.env.TOKEN_ADDRESS || process.argv[2];
-    const DBANK_ADDRESS = process.env.DBANK_ADDRESS || process.argv[3];
-    const STRATEGY_ROUTER_ADDRESS = process.env.STRATEGY_ROUTER_ADDRESS || process.argv[4];
-    const CONFIG_MANAGER_ADDRESS = process.env.CONFIG_MANAGER_ADDRESS || process.argv[5];
-    const MOCKS1_ADDRESS = process.env.MOCKS1_ADDRESS || process.argv[6]; // Optional
+    // Addresses can come from environment variables or config.json (fallback).
+    // We avoid positional CLI args because Hardhat injects its own argv.
+    const chainKey = String(chainId);
+    const cfgNet = (config && config[chainKey]) ? config[chainKey] : {};
+
+    const resolveAddress = (envVar, cfgPath, label) => {
+        const envVal = process.env[envVar];
+        if (envVal && envVal.trim() !== "") return envVal.trim();
+        return cfgPath && cfgPath.address ? cfgPath.address : undefined;
+    };
+
+    const TOKEN_ADDRESS = resolveAddress("token", cfgNet.token, "Token");
+    const DBANK_ADDRESS = resolveAddress("dbank", cfgNet.dbank, "dBank");
+    const STRATEGY_ROUTER_ADDRESS = resolveAddress("strategyRouter", cfgNet.strategyRouter, "StrategyRouter");
+    const CONFIG_MANAGER_ADDRESS = resolveAddress("configManager", cfgNet.configManager, "ConfigManager");
+    const MOCKS1_ADDRESS = resolveAddress("mockS1", cfgNet.mockS1, "MockS1"); // Optional
 
     if (!TOKEN_ADDRESS || !DBANK_ADDRESS || !STRATEGY_ROUTER_ADDRESS || !CONFIG_MANAGER_ADDRESS) {
         console.error("ERROR: Missing contract addresses.");
@@ -53,7 +68,8 @@ async function main() {
         process.exit(1);
     }
 
-    console.log("Contract addresses:");
+    console.log("Contract addresses (source: env overrides > config.json):");
+    console.log(`  chainKey:           ${chainKey}`);
     console.log(`  Token:              ${TOKEN_ADDRESS}`);
     console.log(`  dBank:              ${DBANK_ADDRESS}`);
     console.log(`  StrategyRouter:     ${STRATEGY_ROUTER_ADDRESS}`);
@@ -62,6 +78,24 @@ async function main() {
         console.log(`  MockS1:             ${MOCKS1_ADDRESS}`);
     }
     console.log();
+
+    // ============================================================
+    // Validate that contracts exist at provided addresses
+    // ============================================================
+    const assertHasCode = async (address, label) => {
+        const code = await ethers.provider.getCode(address);
+        if (!code || code === "0x") {
+            throw new Error(`No contract code at ${address} for ${label} on network ${network} (chainId=${chainId}).`);
+        }
+    };
+
+    await assertHasCode(TOKEN_ADDRESS, "Token");
+    await assertHasCode(DBANK_ADDRESS, "dBank");
+    await assertHasCode(STRATEGY_ROUTER_ADDRESS, "StrategyRouter");
+    await assertHasCode(CONFIG_MANAGER_ADDRESS, "ConfigManager");
+    if (MOCKS1_ADDRESS) {
+        await assertHasCode(MOCKS1_ADDRESS, "MockS1");
+    }
 
     // ============================================================
     // Get contract instances
@@ -92,26 +126,26 @@ async function main() {
     // ============================================================
     const BUFFER_TARGET_BPS = 1200; // 12%
     const PERFORMANCE_FEE_BPS = 2500; // 25% (2500 bps)
-    const TVL_CAP = tokens(100000); // 100K tokens
-    const PER_TX_CAP = tokens(5000); // 5K tokens per transaction
+    const TVL_CAP = tokens(isSepolia ? 1000 : 100000); // smaller on Sepolia
+    const PER_TX_CAP = tokens(isSepolia ? 200 : 5000); // smaller on Sepolia
 
     // ConfigManager parameters (uses 6 decimals format: e6)
     const CONFIG_LIQUIDITY_BUFFER_BPS = 1200; // 12%
     const CONFIG_MAX_SLIPPAGE_BPS = 30; // 0.3%
-    const CONFIG_TVL_GLOBAL_CAP = tokens6(100000); // 100K tokens (100000e6)
-    const CONFIG_PER_TX_CAP = tokens6(5000); // 5K tokens (5000e6)
+    const CONFIG_TVL_GLOBAL_CAP = tokens6(isSepolia ? 1000 : 100000);
+    const CONFIG_PER_TX_CAP = tokens6(isSepolia ? 200 : 5000);
     const CONFIG_PERFORMANCE_FEE_BPS = 2500; // 25% (2500 bps)
     const CONFIG_EPOCH_DURATION = 7; // 7 days
     const CONFIG_SETTLEMENT_WINDOW_UTC = 12 * 3600; // 12 hours in seconds
-    const CONFIG_STRATEGY_CAP_S1 = tokens6(100000); // 100K tokens (100000e6)
-    const CONFIG_STRATEGY_CAP_S2 = tokens6(50000); // 50K tokens (50000e6)
-    const CONFIG_STRATEGY_CAP_S3 = tokens6(25000); // 25K tokens (25000e6)
+    const CONFIG_STRATEGY_CAP_S1 = tokens6(isSepolia ? 1000 : 100000);
+    const CONFIG_STRATEGY_CAP_S2 = tokens6(isSepolia ? 500 : 50000);
+    const CONFIG_STRATEGY_CAP_S3 = tokens6(isSepolia ? 250 : 25000);
 
-    // Amounts to fund test accounts
-    const USER_BALANCE = tokens(100000); // 100K tokens per user
-    const DEPOSIT_AMOUNT_USER1 = tokens(10000); // 10K tokens
-    const DEPOSIT_AMOUNT_USER2 = tokens(5000);  // 5K tokens
-    const DEPOSIT_AMOUNT_USER3 = tokens(3000);  // 3K tokens
+    // Amounts to fund test accounts (reduced on Sepolia)
+    const USER_BALANCE = tokens(isSepolia ? 500 : 100000);
+    const DEPOSIT_AMOUNT_USER1 = tokens(isSepolia ? 100 : 10000);
+    const DEPOSIT_AMOUNT_USER2 = tokens(isSepolia ? 50 : 5000);
+    const DEPOSIT_AMOUNT_USER3 = tokens(isSepolia ? 30 : 3000);
 
     // Number of test users to create (maximum 3)
     const NUM_SEED_USERS = Math.min(3, users.length);
@@ -158,7 +192,7 @@ async function main() {
     for (let i = 0; i < NUM_SEED_USERS; i++) {
         const user = users[i];
         const allowance = await token.allowance(user.address, DBANK_ADDRESS);
-        const requiredAllowance = tokens(1000000); // Approve 1M tokens (more than enough)
+        const requiredAllowance = tokens(isSepolia ? 1000 : 1000000); // smaller on Sepolia
 
         if (allowance.lt(requiredAllowance)) {
             console.log(`  Configuring allowance for user ${i + 1}...`);
