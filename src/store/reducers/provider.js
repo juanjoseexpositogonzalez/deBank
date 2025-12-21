@@ -21,7 +21,7 @@ export const provider = createSlice({
 })
 
 export const { 
-    setProvider ,
+    setProvider,
     setNetwork,
     setAccount, 
 } = provider.actions;

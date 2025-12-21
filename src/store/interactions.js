@@ -70,19 +70,18 @@ import MOCK_S1_ABI from '../abis/MockS1.json'
 import config from '../config.json'
 
 export const loadProvider = (dispatch) => {
-    const provider = new ethers.providers.Web3Provider(window.ethereum)
+    // Use 'any' to allow seamless network switching without provider invalidation
+    const provider = new ethers.providers.Web3Provider(window.ethereum, 'any')
     dispatch(setProvider(provider))
 
     return provider
-
 }
 
 export const loadNetwork = async (provider, dispatch) => {
-    const { chainId }= await provider.getNetwork()
-    dispatch(setNetwork(chainId.toString()))
-
-    return chainId.toString()
-
+    const { chainId } = await provider.getNetwork()            
+    
+    dispatch(setNetwork(chainId))
+    return chainId
 }
 
 export const loadAccount = async (dispatch) => {    
@@ -96,14 +95,57 @@ export const loadAccount = async (dispatch) => {
 // ----------------------------------------------------------
 // LOAD CONTRACTS
 export const loadTokens = async (provider, chainId, dispatch) => {
-    const usdc = new ethers.Contract(config[chainId].token.address, TOKEN_ABI, provider)
+    // Validate chainId exists in config
+    if (!config[chainId]) {
+        throw new Error(`Chain ID ${chainId} is not configured. Please connect to a supported network.`);
+    }
+    
+    if (!config[chainId].token || !config[chainId].token.address) {
+        throw new Error(`Token address not configured for chain ID ${chainId}`);
+    }
+    
+    // Check for zero address (contracts not deployed)
+    const tokenAddress = config[chainId].token.address;
+    if (tokenAddress === ethers.constants.AddressZero || 
+        tokenAddress === '0x0000000000000000000000000000000000000000') {
+        const networkNames = {
+            '31337': 'Hardhat Local',
+            '11155111': 'Sepolia Testnet'
+        };
+        const networkName = networkNames[chainId] || `Chain ID ${chainId}`;
+        throw new Error(
+            `Contracts are not deployed on ${networkName}.\n\n` +
+            `Please deploy contracts first or switch to a network where contracts are deployed.\n` +
+            `To deploy: npx hardhat run scripts/deploy.js --network sepolia`
+        );
+    }
+    
+    const usdc = new ethers.Contract(tokenAddress, TOKEN_ABI, provider)
 
     dispatch(setContracts([usdc]));   
     dispatch(setSymbols([await usdc.symbol()]));    
+
+    return [usdc]
 }
 
 export const loadBank = async (provider, chainId, dispatch) => {
-    const dBank = new ethers.Contract(config[chainId].dbank.address, DBANK_ABI, provider)
+    if (!config[chainId] || !config[chainId].dbank || !config[chainId].dbank.address) {
+        throw new Error(`dBank address not configured for chain ID ${chainId}`);
+    }
+    
+    // Check for zero address (contracts not deployed)
+    const dbankAddress = config[chainId].dbank.address;
+    if (dbankAddress === ethers.constants.AddressZero || 
+        dbankAddress === '0x0000000000000000000000000000000000000000') {
+        const networkNames = {
+            '31337': 'Hardhat Local',
+            '11155111': 'Sepolia Testnet'
+        };
+        const networkName = networkNames[chainId] || `Chain ID ${chainId}`;
+        throw new Error(`dBank contract is not deployed on ${networkName}`);
+    }
+    
+    const dBank = new ethers.Contract(dbankAddress, DBANK_ABI, provider)
 
     dispatch(setContract(dBank));
     dispatch(setSymbol(await dBank.symbol()));  
@@ -112,13 +154,30 @@ export const loadBank = async (provider, chainId, dispatch) => {
 }
 
 export const loadStrategyRouter = async (provider, chainId, dispatch) => {
-    const strategyRouter = new ethers.Contract(config[chainId].strategyRouter.address, STRATEGY_ROUTER_ABI, provider)
+    if (!config[chainId] || !config[chainId].strategyRouter || !config[chainId].strategyRouter.address) {
+        throw new Error(`StrategyRouter address not configured for chain ID ${chainId}`);
+    }
+    
+    // Check for zero address (contracts not deployed)
+    const routerAddress = config[chainId].strategyRouter.address;
+    if (routerAddress === ethers.constants.AddressZero || 
+        routerAddress === '0x0000000000000000000000000000000000000000') {
+        const networkNames = {
+            '31337': 'Hardhat Local',
+            '11155111': 'Sepolia Testnet'
+        };
+        const networkName = networkNames[chainId] || `Chain ID ${chainId}`;
+        throw new Error(`StrategyRouter contract is not deployed on ${networkName}`);
+    }
+    
+    const strategyRouter = new ethers.Contract(routerAddress, STRATEGY_ROUTER_ABI, provider)
 
     dispatch(setRouterContract(strategyRouter)); 
     dispatch(setAsset(await strategyRouter.asset()));
     
-    // Get total strategies count
-    const totalStrategies = await strategyRouter.totalStrategies();
+    // Get total strategies count (BigNumber -> number for iteration)
+    const totalStrategiesBN = await strategyRouter.totalStrategies();
+    const totalStrategies = totalStrategiesBN.toNumber();
     dispatch(setTotalStrategies(totalStrategies));
     
     // Get total allocated
@@ -188,7 +247,23 @@ export const loadStrategyRouter = async (provider, chainId, dispatch) => {
 }
 
 export const loadMockS1 = async (provider, chainId, dispatch) => {
-    const mockS1 = new ethers.Contract(config[chainId].mockS1.address, MOCK_S1_ABI, provider)
+    if (!config[chainId] || !config[chainId].mockS1 || !config[chainId].mockS1.address) {
+        throw new Error(`MockS1 address not configured for chain ID ${chainId}`);
+    }
+    
+    // Check for zero address (contracts not deployed)
+    const mockS1Address = config[chainId].mockS1.address;
+    if (mockS1Address === ethers.constants.AddressZero || 
+        mockS1Address === '0x0000000000000000000000000000000000000000') {
+        const networkNames = {
+            '31337': 'Hardhat Local',
+            '11155111': 'Sepolia Testnet'
+        };
+        const networkName = networkNames[chainId] || `Chain ID ${chainId}`;
+        throw new Error(`MockS1 contract is not deployed on ${networkName}`);
+    }
+    
+    const mockS1 = new ethers.Contract(mockS1Address, MOCK_S1_ABI, provider)
 
     dispatch(setMockS1Contract(mockS1));
     dispatch(setMockS1Principal(await mockS1.principal())); 
@@ -201,7 +276,23 @@ export const loadMockS1 = async (provider, chainId, dispatch) => {
 }
 
 export const loadConfigManager = async (provider, chainId, dispatch) => {
-    const configManager = new ethers.Contract(config[chainId].configManager.address, CONFIG_MANAGER_ABI, provider)
+    if (!config[chainId] || !config[chainId].configManager || !config[chainId].configManager.address) {
+        throw new Error(`ConfigManager address not configured for chain ID ${chainId}`);
+    }
+    
+    // Check for zero address (contracts not deployed)
+    const configManagerAddress = config[chainId].configManager.address;
+    if (configManagerAddress === ethers.constants.AddressZero || 
+        configManagerAddress === '0x0000000000000000000000000000000000000000') {
+        const networkNames = {
+            '31337': 'Hardhat Local',
+            '11155111': 'Sepolia Testnet'
+        };
+        const networkName = networkNames[chainId] || `Chain ID ${chainId}`;
+        throw new Error(`ConfigManager contract is not deployed on ${networkName}`);
+    }
+    
+    const configManager = new ethers.Contract(configManagerAddress, CONFIG_MANAGER_ABI, provider)
 
     dispatch(setConfigManagerContract(configManager));
     dispatch(setConfigManagerLiquidityBufferBps(await configManager.liquidityBufferBps()));
@@ -230,10 +321,17 @@ export const loadConfigManager = async (provider, chainId, dispatch) => {
 
 // ----------------------------------------------------------
 // LOAD BALANCES AND SHAPES
-export const loadBalances = async(tokens, account, dispatch) => {
+export const loadBalances = async(dBank, tokens, account, dispatch) => {
     const usdcBalance = await tokens[0].balanceOf(account)
-    dispatch(balancesLoaded([usdcBalance]))
+    dispatch(balancesLoaded([
+        ethers.utils.formatUnits(usdcBalance.toString(), 'ether')
+    ]))
 
-    return usdcBalance 
+    const totalAssets = await dBank.totalAssets()
+    const shares = await dBank.convertToShares(totalAssets)
+    dispatch(setAssets(ethers.utils.formatUnits(totalAssets.toString(), 'ether')))
+    dispatch(sharesLoaded(ethers.utils.formatUnits(shares.toString(), 'ether')))
+
+    return { usdcBalance, shares }
 }
 
