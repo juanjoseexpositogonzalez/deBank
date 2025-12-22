@@ -30,7 +30,7 @@ const Navigation = () => {
     const targetChainId = e.target.value;
     
     try {      
-      const result = await window.ethereum.request({
+      await window.ethereum.request({
         method: 'wallet_switchEthereumChain',
         params: [{ chainId: targetChainId }]
       });      
