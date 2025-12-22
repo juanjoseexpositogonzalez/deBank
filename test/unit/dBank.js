@@ -878,14 +878,298 @@ describe('dBank', () => {
             const depositAmount = MEDIUM_AMOUNT // 0.00001 tokens
             const withdrawAmount = SMALL_AMOUNT // 0.000001 tokens
             await token.connect(receiver).approve(dbank.address, depositAmount)
-            
+
             await dbank.connect(receiver).deposit(depositAmount, receiver.address)
             const sharesBefore = await dbank.balanceOf(receiver.address)
-            
+
             await dbank.connect(receiver).withdraw(withdrawAmount, receiver.address, receiver.address)
             const sharesAfter = await dbank.balanceOf(receiver.address)
-            
+
             expect(sharesBefore).to.be.gt(sharesAfter)
+        })
+    })
+
+    // ===========================================================
+    // Suite: [VAULT/ALLOCATION] Strategy Allocation
+    // ===========================================================
+
+    describe('[VAULT/ALLOCATION] Strategy Allocation', () => {
+        let mockS1
+
+        beforeEach(async () => {
+            // Increase caps for larger test amounts
+            await dbank.connect(deployer).setTvlCap(tokens(1000000))
+            await dbank.connect(deployer).setPerTxCap(tokens(100000))
+
+            // Deploy MockS1 strategy
+            const MockS1 = await ethers.getContractFactory('MockS1')
+            mockS1 = await MockS1.deploy(token.address)
+
+            // Set strategy parameters (5% APR, 1M cap)
+            await mockS1.setParams(500, tokens(1000000))
+
+            // Register strategy with router
+            await strategyRouter.registerStrategy(1, mockS1.address, tokens(100000))
+
+            // Deposit some tokens to dBank
+            const depositAmount = tokens(10000)
+            await token.connect(receiver).approve(dbank.address, depositAmount)
+            await dbank.connect(receiver).deposit(depositAmount, receiver.address)
+        })
+
+        it('allocate moves assets from buffer to strategy', async () => {
+            const allocateAmount = tokens(5000)
+            const bufferBefore = await dbank.buffer()
+
+            await dbank.connect(deployer).allocate(1, allocateAmount)
+
+            const bufferAfter = await dbank.buffer()
+            expect(bufferBefore.sub(bufferAfter)).to.equal(allocateAmount)
+        })
+
+        it('allocate emits Allocated event', async () => {
+            const allocateAmount = tokens(5000)
+
+            await expect(dbank.connect(deployer).allocate(1, allocateAmount))
+                .to.emit(dbank, 'Allocated')
+                .withArgs(1, allocateAmount, tokens(5000)) // buffer after = 10000 - 5000
+        })
+
+        it('allocate reverts when amount exceeds buffer', async () => {
+            const buffer = await dbank.buffer()
+            const excessAmount = buffer.add(tokens(1000))
+
+            await expect(
+                dbank.connect(deployer).allocate(1, excessAmount)
+            ).to.be.revertedWithCustomError(dbank, 'dBank__InsufficientLiquidity')
+        })
+
+        it('allocate reverts when not owner', async () => {
+            await expect(
+                dbank.connect(receiver).allocate(1, tokens(1000))
+            ).to.be.revertedWithCustomError(dbank, 'dBank__NotOwner')
+        })
+
+        it('allocate reverts when paused', async () => {
+            await dbank.connect(deployer).pause(true)
+
+            await expect(
+                dbank.connect(deployer).allocate(1, tokens(1000))
+            ).to.be.revertedWithCustomError(dbank, 'dBank__Paused')
+        })
+
+        it('allocate reverts with zero amount', async () => {
+            await expect(
+                dbank.connect(deployer).allocate(1, 0)
+            ).to.be.revertedWithCustomError(dbank, 'dBank__InvalidAmount')
+        })
+
+        it('totalAssets includes allocated strategy assets', async () => {
+            const totalAssetsBefore = await dbank.totalAssets()
+
+            await dbank.connect(deployer).allocate(1, tokens(5000))
+
+            const totalAssetsAfter = await dbank.totalAssets()
+            // Total assets should remain the same (just moved from buffer to strategy)
+            expect(totalAssetsAfter).to.equal(totalAssetsBefore)
+        })
+
+        it('pricePerShare remains stable after allocation', async () => {
+            const priceBefore = await dbank.pricePerShare()
+
+            await dbank.connect(deployer).allocate(1, tokens(5000))
+
+            const priceAfter = await dbank.pricePerShare()
+            expect(priceAfter).to.equal(priceBefore)
+        })
+    })
+
+    // ===========================================================
+    // Suite: [VAULT/STRATEGY_WITHDRAW] Withdraw from Strategies
+    // ===========================================================
+
+    describe('[VAULT/STRATEGY_WITHDRAW] Withdraw from Strategies', () => {
+        let mockS1
+
+        beforeEach(async () => {
+            // Increase caps for larger test amounts
+            await dbank.connect(deployer).setTvlCap(tokens(1000000))
+            await dbank.connect(deployer).setPerTxCap(tokens(100000))
+
+            // Deploy MockS1 strategy
+            const MockS1 = await ethers.getContractFactory('MockS1')
+            mockS1 = await MockS1.deploy(token.address)
+
+            // Set strategy parameters (5% APR, 1M cap)
+            await mockS1.setParams(500, tokens(1000000))
+
+            // Register strategy with router
+            await strategyRouter.registerStrategy(1, mockS1.address, tokens(100000))
+
+            // Deposit tokens to dBank
+            const depositAmount = tokens(10000)
+            await token.connect(receiver).approve(dbank.address, depositAmount)
+            await dbank.connect(receiver).deposit(depositAmount, receiver.address)
+
+            // Allocate most to strategy, leaving small buffer
+            await dbank.connect(deployer).allocate(1, tokens(8000))
+
+            // Transfer tokens to router (simulating the router having liquidity)
+            await token.transfer(strategyRouter.address, tokens(10000))
+        })
+
+        it('withdraw from buffer when sufficient', async () => {
+            const buffer = await dbank.buffer()
+            const withdrawAmount = buffer.div(2) // Half of buffer
+
+            const balanceBefore = await token.balanceOf(receiver.address)
+            await dbank.connect(receiver).withdraw(withdrawAmount, receiver.address, receiver.address)
+            const balanceAfter = await token.balanceOf(receiver.address)
+
+            expect(balanceAfter.sub(balanceBefore)).to.equal(withdrawAmount)
+        })
+
+        it('withdraw pulls from strategy when buffer insufficient', async () => {
+            const buffer = await dbank.buffer()
+            const withdrawAmount = buffer.add(tokens(1000)) // More than buffer
+
+            const balanceBefore = await token.balanceOf(receiver.address)
+            await dbank.connect(receiver).withdraw(withdrawAmount, receiver.address, receiver.address)
+            const balanceAfter = await token.balanceOf(receiver.address)
+
+            expect(balanceAfter.sub(balanceBefore)).to.equal(withdrawAmount)
+        })
+
+        it('withdraw emits WithdrawnFromStrategy when pulling from strategies', async () => {
+            const buffer = await dbank.buffer()
+            const withdrawAmount = buffer.add(tokens(1000)) // Forces strategy withdrawal
+
+            await expect(dbank.connect(receiver).withdraw(withdrawAmount, receiver.address, receiver.address))
+                .to.emit(dbank, 'WithdrawnFromStrategy')
+        })
+
+        it('redeem pulls from strategy when buffer insufficient', async () => {
+            // Get shares worth more than buffer
+            const buffer = await dbank.buffer()
+            const shares = await dbank.balanceOf(receiver.address)
+            const assetsForShares = await dbank.convertToAssets(shares)
+
+            // Only redeem if we have enough shares for more than buffer
+            if (assetsForShares.gt(buffer)) {
+                const redeemShares = shares.div(2) // Half of shares
+                const expectedAssets = await dbank.convertToAssets(redeemShares)
+
+                if (expectedAssets.gt(buffer)) {
+                    const balanceBefore = await token.balanceOf(receiver.address)
+                    await dbank.connect(receiver).redeem(redeemShares, receiver.address, receiver.address)
+                    const balanceAfter = await token.balanceOf(receiver.address)
+
+                    // Use tolerance for comparison due to yield accrual during test execution
+                    const actualReceived = balanceAfter.sub(balanceBefore)
+                    // Allow 0.01% tolerance for timing differences
+                    const tolerance = expectedAssets.div(10000)
+                    expect(actualReceived).to.be.gte(expectedAssets.sub(tolerance))
+                    expect(actualReceived).to.be.lte(expectedAssets.add(tolerance))
+                }
+            }
+        })
+    })
+
+    // ===========================================================
+    // Suite: [VAULT/YIELD] Share/Asset Ratio with Yield
+    // ===========================================================
+
+    describe('[VAULT/YIELD] Share/Asset Ratio with Yield', () => {
+        let mockS1
+
+        beforeEach(async () => {
+            // Increase caps for larger test amounts
+            await dbank.connect(deployer).setTvlCap(tokens(1000000))
+            await dbank.connect(deployer).setPerTxCap(tokens(100000))
+
+            // Deploy MockS1 strategy
+            const MockS1 = await ethers.getContractFactory('MockS1')
+            mockS1 = await MockS1.deploy(token.address)
+
+            // Set strategy parameters (5% APR, 1M cap)
+            await mockS1.setParams(500, tokens(1000000))
+
+            // Register strategy with router
+            await strategyRouter.registerStrategy(1, mockS1.address, tokens(100000))
+
+            // Deposit tokens to dBank
+            const depositAmount = tokens(10000)
+            await token.connect(receiver).approve(dbank.address, depositAmount)
+            await dbank.connect(receiver).deposit(depositAmount, receiver.address)
+
+            // Allocate to strategy
+            await dbank.connect(deployer).allocate(1, tokens(8000))
+        })
+
+        it('pricePerShare increases when strategy generates yield', async () => {
+            const priceBefore = await dbank.pricePerShare()
+
+            // Simulate yield by advancing time (MockS1 accrues yield over time)
+            await ethers.provider.send("evm_increaseTime", [YEAR])
+            await ethers.provider.send("evm_mine", [])
+
+            const priceAfter = await dbank.pricePerShare()
+            expect(priceAfter).to.be.gt(priceBefore)
+        })
+
+        it('convertToAssets returns more assets per share after yield', async () => {
+            const shares = tokens(1000)
+            const assetsBefore = await dbank.convertToAssets(shares)
+
+            // Simulate yield
+            await ethers.provider.send("evm_increaseTime", [YEAR])
+            await ethers.provider.send("evm_mine", [])
+
+            const assetsAfter = await dbank.convertToAssets(shares)
+            expect(assetsAfter).to.be.gt(assetsBefore)
+        })
+
+        it('convertToShares returns fewer shares per asset after yield', async () => {
+            const assets = tokens(1000)
+            const sharesBefore = await dbank.convertToShares(assets)
+
+            // Simulate yield
+            await ethers.provider.send("evm_increaseTime", [YEAR])
+            await ethers.provider.send("evm_mine", [])
+
+            const sharesAfter = await dbank.convertToShares(assets)
+            expect(sharesAfter).to.be.lt(sharesBefore)
+        })
+
+        it('new depositor gets fewer shares after yield accrues', async () => {
+            // First depositor already has shares
+            const firstDepositorShares = await dbank.balanceOf(receiver.address)
+
+            // Simulate yield
+            await ethers.provider.send("evm_increaseTime", [YEAR])
+            await ethers.provider.send("evm_mine", [])
+
+            // Second depositor deposits same amount
+            const depositAmount = tokens(10000)
+            await token.connect(user1).approve(dbank.address, depositAmount)
+            await dbank.connect(user1).deposit(depositAmount, user1.address)
+
+            const secondDepositorShares = await dbank.balanceOf(user1.address)
+
+            // Second depositor should get fewer shares for same assets
+            // (because pricePerShare increased)
+            expect(secondDepositorShares).to.be.lt(firstDepositorShares)
+        })
+
+        it('totalAssets increases when strategy generates yield', async () => {
+            const totalAssetsBefore = await dbank.totalAssets()
+
+            // Simulate yield
+            await ethers.provider.send("evm_increaseTime", [YEAR])
+            await ethers.provider.send("evm_mine", [])
+
+            const totalAssetsAfter = await dbank.totalAssets()
+            expect(totalAssetsAfter).to.be.gt(totalAssetsBefore)
         })
     })
 })

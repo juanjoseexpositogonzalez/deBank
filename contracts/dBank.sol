@@ -33,6 +33,8 @@ contract dBank {
     error dBank__InvalidReceiver();
     error dBank__EpochNotComplete();
     error dBank__InsufficientAllowance();
+    error dBank__InvalidStrategy();
+    error dBank__AllocationFailed();
     
     // State Variables
     Token public immutable asset;
@@ -101,6 +103,8 @@ contract dBank {
     event FeesCrystallized(uint256 gain, uint256 feeAmount, uint256 newHighWaterMark, uint256 timestamp);
     event ConfigUpdated(bytes32 indexed key, uint256 oldValue, uint256 newValue);
     event Paused(bool paused);
+    event Allocated(uint256 indexed strategyId, uint256 amount, uint256 newBuffer);
+    event WithdrawnFromStrategy(uint256 indexed strategyId, uint256 amount);
 
     // modifiers
     modifier onlyOwner() {
@@ -273,12 +277,15 @@ contract dBank {
         } else {
             // Serve from buffer + withdraw from router (sync)
             uint256 bufferToServe = buffer;
-            buffer = 0;
             uint256 assetsToWithdraw = _assets - bufferToServe;
-            // Note: StrategyRouter integration needs to be implemented
-            // For now, this is a placeholder - actual implementation should call
-            // StrategyRouter(strategyRouter).withdrawFromStrategy(strategyId, assetsToWithdraw, maxSlippageBps)
-            revert dBank__InsufficientLiquidity(assetsToWithdraw, buffer);
+            buffer = 0;
+
+            // Withdraw from strategies via router
+            uint256 maxSlippageBps = ConfigManager(configManager).maxSlippageBps();
+            uint256 withdrawn = _withdrawFromStrategies(assetsToWithdraw, maxSlippageBps);
+            if (withdrawn < assetsToWithdraw) {
+                revert dBank__InsufficientLiquidity(assetsToWithdraw, withdrawn);
+            }
         }
         // 7. Transfer assets to receiver
         asset.transfer(_receiver, _assets);
@@ -304,12 +311,15 @@ contract dBank {
             buffer -= assets;
         } else {
             uint256 bufferToServe = buffer;
-            buffer = 0;
             uint256 assetsToWithdraw = assets - bufferToServe;
-            // Note: StrategyRouter integration needs to be implemented
-            // For now, this is a placeholder - actual implementation should call
-            // StrategyRouter(strategyRouter).withdrawFromStrategy(strategyId, assetsToWithdraw, maxSlippageBps)
-            revert dBank__InsufficientLiquidity(assetsToWithdraw, buffer);
+            buffer = 0;
+
+            // Withdraw from strategies via router
+            uint256 maxSlippageBps = ConfigManager(configManager).maxSlippageBps();
+            uint256 withdrawn = _withdrawFromStrategies(assetsToWithdraw, maxSlippageBps);
+            if (withdrawn < assetsToWithdraw) {
+                revert dBank__InsufficientLiquidity(assetsToWithdraw, withdrawn);
+            }
         }
         // 6. Transfer assets to receiver
         asset.transfer(_receiver, assets);
@@ -485,6 +495,79 @@ contract dBank {
     }
 
     //===========================================================
+    // Custom Functions - Strategy Allocation
+    //===========================================================
+
+    /**
+     * @notice Allocate assets from buffer to a strategy via the router
+     * @param _strategyId The strategy ID to allocate to
+     * @param _amount The amount of assets to allocate
+     * @return The amount actually allocated
+     */
+    function allocate(uint256 _strategyId, uint256 _amount) external onlyOwner whenNotPaused returns (uint256) {
+        if (_amount == 0) revert dBank__InvalidAmount();
+        if (_amount > buffer) revert dBank__InsufficientLiquidity(_amount, buffer);
+
+        // Approve router to spend tokens
+        asset.approve(strategyRouter, _amount);
+
+        // Deposit to strategy via router
+        uint256 allocated = StrategyRouter(strategyRouter).depositToStrategy(_strategyId, _amount);
+
+        // Update buffer
+        uint256 oldBuffer = buffer;
+        buffer -= allocated;
+
+        emit Allocated(_strategyId, allocated, buffer);
+        emit BufferUpdated(oldBuffer, buffer);
+
+        return allocated;
+    }
+
+    /**
+     * @notice Internal function to withdraw assets from strategies
+     * @param _amount The amount of assets to withdraw
+     * @param _maxSlippageBps Maximum slippage in basis points
+     * @return totalWithdrawn The total amount withdrawn
+     */
+    function _withdrawFromStrategies(uint256 _amount, uint256 _maxSlippageBps) internal returns (uint256 totalWithdrawn) {
+        StrategyRouter router = StrategyRouter(strategyRouter);
+        uint256 remaining = _amount;
+        uint256 totalStrategies = router.totalStrategies();
+
+        // Iterate through strategies and withdraw until we have enough
+        for (uint256 i = 1; i <= totalStrategies && remaining > 0; i++) {
+            (address strategyAddr, bool active, , ) = router.getStrategy(i);
+
+            if (strategyAddr == address(0) || !active) continue;
+
+            // Get available assets in this strategy
+            (bool success, bytes memory data) = strategyAddr.staticcall(
+                abi.encodeWithSignature("totalAssets()")
+            );
+            if (!success) continue;
+
+            uint256 strategyAssets = abi.decode(data, (uint256));
+            if (strategyAssets == 0) continue;
+
+            // Withdraw min(remaining, strategyAssets)
+            uint256 toWithdraw = remaining > strategyAssets ? strategyAssets : remaining;
+
+            try router.withdrawFromStrategy(i, toWithdraw, _maxSlippageBps) returns (uint256 withdrawn) {
+                totalWithdrawn += withdrawn;
+                remaining -= withdrawn;
+                buffer += withdrawn;
+                emit WithdrawnFromStrategy(i, withdrawn);
+            } catch {
+                // Strategy withdrawal failed, try next strategy
+                continue;
+            }
+        }
+
+        return totalWithdrawn;
+    }
+
+    //===========================================================
     // Custom Functions - Buffer Management
     //===========================================================
 
@@ -492,20 +575,17 @@ contract dBank {
         uint256 _totalAssets = this.totalAssets();
         uint256 targetBuffer = (_totalAssets * bufferTargetBps) / MAX_BPS;
         uint256 oldBuffer = buffer;
-        
+
         if (buffer < targetBuffer) {
-            // Need to fill buffer - withdraw from router
-            // uint256 needed = targetBuffer - buffer;
-            // Note: Router integration needs to be implemented
-            // For now, we just update the buffer state
-            buffer = targetBuffer;
-        } else if (buffer > targetBuffer) {
-            // Excess buffer - deposit to router
-            // uint256 excess = buffer - targetBuffer;
-            // Note: Router integration needs to be implemented
-            buffer = targetBuffer;
+            // Need to fill buffer - withdraw from strategies
+            uint256 needed = targetBuffer - buffer;
+            uint256 maxSlippageBps = ConfigManager(configManager).maxSlippageBps();
+            _withdrawFromStrategies(needed, maxSlippageBps);
+            // Note: buffer is updated inside _withdrawFromStrategies
         }
-        
+        // Note: We don't auto-deposit excess buffer to router
+        // Use allocate() function to manually allocate excess buffer
+
         if (oldBuffer != buffer) {
             emit BufferUpdated(oldBuffer, buffer);
         }
@@ -514,9 +594,9 @@ contract dBank {
     function _fillBuffer(uint256 targetAmount) internal {
         uint256 needed = targetAmount > buffer ? targetAmount - buffer : 0;
         if (needed > 0) {
-            // Withdraw from router
-            // Note: Router integration needs to be implemented
-            buffer = targetAmount;
+            // Withdraw from strategies via router
+            uint256 maxSlippageBps = ConfigManager(configManager).maxSlippageBps();
+            _withdrawFromStrategies(needed, maxSlippageBps);
         }
     }
 }
