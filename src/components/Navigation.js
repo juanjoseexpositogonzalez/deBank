@@ -4,7 +4,7 @@ import Button from 'react-bootstrap/Button';
 import Form from 'react-bootstrap/Form';
 import Blockies from 'react-blockies';
 
-import logo from '../logo.png';
+import logo from '../assets/logo.png';
 
 import { loadAccount, loadBalances } from '../store/interactions';
 
