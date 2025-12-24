@@ -1,13 +1,13 @@
-import { Card, Button } from 'react-bootstrap';
+import { Card, Button, Spinner } from 'react-bootstrap';
 import Form from 'react-bootstrap/Form';
 import InputGroup from 'react-bootstrap/InputGroup';
 import Row from 'react-bootstrap/Row';
-import Spinner from 'react-bootstrap/Spinner';
 import { ethers } from 'ethers';
 
+import Alert from './Alert'
+
 import {
-    depositFunds,
-    loadBalances,
+    depositFunds,    
 } from '../store/interactions';
 
 import { useSelector, useDispatch } from 'react-redux';
@@ -16,9 +16,12 @@ import { useState } from 'react';
 
 const Deposit = () => {
     const [usdcAmount, setUsdcAmount] = useState("");
-    const [sharesAmount, setSharesAmount] = useState("");    
-    const [isApproving, setIsApproving] = useState(false);
-    const [isDepositing, setIsDepositing] = useState(false);
+    const [sharesAmount, setSharesAmount] = useState("");   
+    const [showAlert, setShowAlert] = useState(false);
+
+    const isDepositing = useSelector(state => state.dBank.depositing.isDepositing);
+    const isDepositSuccess = useSelector(state => state.dBank.depositing.isSuccess);
+    const transactionHash = useSelector(state => state.dBank.depositing.transactionHash);
     
     const provider = useSelector(state => state.provider.connection);
     const account = useSelector(state => state.provider.account);
@@ -91,26 +94,24 @@ const Deposit = () => {
     }
 
     const maxHandlerShares = async () => {
-        const maxShares = shares;
+        // Use available token balance to compute max purchasable shares
+        const maxUsdc = balances && balances[0];
 
-        // Handle edge cases
-        if (!maxShares || parseFloat(maxShares) <= 0) {
+        if (!maxUsdc || parseFloat(maxUsdc) <= 0) {
             return;
         }
 
-        // Set shares amount to max shares
-        setSharesAmount(maxShares);
-
-        // Calculate corresponding usdc
         try {
-            const amountInWei = ethers.utils.parseUnits(maxShares, 18);
-            const usdcInWei = await dBank.convertToAssets(amountInWei);
-            const usdcFormatted = ethers.utils.formatUnits(usdcInWei, 18);
-            setUsdcAmount(usdcFormatted);
+            const amountInWei = ethers.utils.parseUnits(maxUsdc, 18);
+            const sharesInWei = await dBank.convertToShares(amountInWei);
+            const sharesFormatted = ethers.utils.formatUnits(sharesInWei, 18);
+
+            // Set both fields coherently
+            setUsdcAmount(maxUsdc);
+            setSharesAmount(sharesFormatted);
         } catch (error) {
             console.error("Max conversion error:", error);
         }
-        
     }
 
     const depositHandler = async (e) => {
@@ -122,13 +123,17 @@ const Deposit = () => {
             return;
         }
 
+        // reset alerts and start flow
+        setShowAlert(false);
+
         const result = await depositFunds(provider, dBank, tokens, account, usdcAmount, dispatch);
+        
+        setShowAlert(true);
+
         if (result) {
-            alert("Deposit successful");
             setUsdcAmount("");
             setSharesAmount("");
         } else {
-            alert("Deposit failed");
             setUsdcAmount("");
             setSharesAmount("");
         }
@@ -211,17 +216,17 @@ const Deposit = () => {
                         <Button
                             variant='primary'
                             type='submit'
-                            disabled={isApproving || isDepositing || !usdcAmount}
+                            disabled={isDepositing || !usdcAmount}
                             >
-                              {isApproving ? (
+                              {isDepositing && !isDepositSuccess ? (
                                 <>
-                                <Spinner as="span" animation="border" size="sm" className="me-2" />
-                                Approving ...
+                                  <Spinner as="span" animation="border" size="sm" className="me-2" />
+                                  Approving ...
                                 </>
-                              ) : isDepositing ? (
+                              ) : isDepositing && isDepositSuccess ? (
                                 <>
-                                <Spinner as="span" animation="border" size="sm" className="me-2" />
-                                Depositing ...
+                                  <Spinner as="span" animation="border" size="sm" className="me-2" />
+                                  Depositing ...
                                 </>
                               ) : (
                                 "Deposit"
@@ -238,6 +243,31 @@ const Deposit = () => {
                 </p>
             )}
             </Card>
+
+            {isDepositing ? (
+                <Alert
+                    message={'Deposit Pending...'}
+                    transactionHash={null}
+                    variant={'info'}
+                    setShowAlert={setShowAlert}
+                />
+                ) : isDepositSuccess && showAlert ? (
+                <Alert
+                    message={'Deposit Successful'}
+                    transactionHash={transactionHash}
+                    variant={'success'}
+                    setShowAlert={setShowAlert}
+                />
+                ) : !isDepositSuccess && showAlert ? (
+                <Alert
+                    message={'Deposit Failed'}
+                    transactionHash={null}
+                    variant={'danger'}
+                    setShowAlert={setShowAlert}
+                />
+                ) : (
+                <></>
+      )}
         </div>
     );
 }

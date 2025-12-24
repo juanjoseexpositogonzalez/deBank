@@ -35,6 +35,12 @@ export const dBank = createSlice({
             state.depositing.isSuccess = false;
             state.depositing.transactionHash = null;
         },
+        depositApproveSuccess: (state, action) => {
+            // Approval done, keep depositing flag true to continue with deposit
+            state.depositing.isDepositing = true;
+            state.depositing.isSuccess = true;
+            state.depositing.transactionHash = action.payload || null;
+        },
         depositSuccess: (state, action) => {
             state.depositing.isDepositing = false;
             state.depositing.isSuccess = true;
@@ -55,6 +61,7 @@ export const {
     sharesLoaded,
     setTotalSupply,
     depositRequest,
+    depositApproveSuccess,
     depositSuccess,
     depositFail,
 } = dBank.actions;

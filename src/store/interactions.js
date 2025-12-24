@@ -21,6 +21,7 @@ import {
     sharesLoaded, 
     setTotalSupply,
     depositRequest,
+    depositApproveSuccess,
     depositSuccess,
     depositFail,
 } from './reducers/dBank';
@@ -361,17 +362,15 @@ export const depositFunds = async (provider, dBank, tokens, account, usdcAmount,
 
         // Step 2: If allowance insufficient, request approval
         if (currentAllowance.lt(amountInWei)) {
-            dispatch(depositRequest());
-
             const approveTx = await tokenWithSigner.approve(dBank.address, amountInWei);
             await approveTx.wait(); // Wait for confirmation
-
-            dispatch(depositSuccess(approveTx.hash));
+            dispatch(depositApproveSuccess(approveTx.hash));
+        } else {
+            // No approval needed, mark phase as ready to deposit
+            dispatch(depositApproveSuccess(null));
         }
 
-        // Step 3. Execute deposit
-        dispatch(depositRequest());
-
+        // Step 3. Execute deposit (keep isDepositing true)
         const depositTx = await dBankWIthSigner.deposit(amountInWei, account);
         await depositTx.wait(); // Wait for confirmation
 
@@ -379,8 +378,6 @@ export const depositFunds = async (provider, dBank, tokens, account, usdcAmount,
         
         // Step 4. Refresh balances
         await loadBalances(dBank, tokens, account, dispatch);
-
-        dispatch(depositSuccess(depositTx.hash));
 
         return true;
 
