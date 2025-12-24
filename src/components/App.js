@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { HashRouter, Routes, Route } from 'react-router-dom'
-import { useDispatch, useSelector } from 'react-redux'
+import { useDispatch } from 'react-redux'
 import { Container } from 'react-bootstrap'
 import { ethers } from 'ethers'
 
@@ -35,9 +35,6 @@ import { setAccount } from '../store/reducers/provider'
 function App() {
 
   const dispatch = useDispatch()
-  const account = useSelector(state => state.provider.account)
-  const tokens = useSelector(state => state.tokens.contracts)
-  const dBank = useSelector(state => state.dBank.contract)
 
   useEffect(() => {
     // Named handlers for proper cleanup
@@ -64,11 +61,9 @@ function App() {
         await loadMockS1(nextProvider, nextChainId, dispatch);
         await loadConfigManager(nextProvider, nextChainId, dispatch);
 
-        // Refresh balances/shares if we still have an account
-        const currentAccount = (accounts && accounts.length > 0)
-          ? ethers.utils.getAddress(accounts[0])
-          : account;
-        if (currentAccount && nextDBank && nextTokens && nextTokens.length > 0) {
+        // Refresh balances/shares if we have an account
+        if (accounts && accounts.length > 0 && nextDBank && nextTokens && nextTokens.length > 0) {
+          const currentAccount = ethers.utils.getAddress(accounts[0]);
           await loadBalances(nextDBank, nextTokens, currentAccount, dispatch);
         }
       } catch (error) {
@@ -81,7 +76,25 @@ function App() {
     const handleAccountsChanged = async () => {
       const accounts = await window.ethereum.request({ method: 'eth_accounts' });
       if (accounts && accounts.length > 0) {
-        dispatch(setAccount(ethers.utils.getAddress(accounts[0])));
+        const newAccount = ethers.utils.getAddress(accounts[0]);
+        dispatch(setAccount(newAccount));
+
+        // Get fresh provider and contracts (avoid closure issues)
+        try {
+          const freshProvider = new ethers.providers.Web3Provider(window.ethereum, 'any');
+          const { chainId } = await freshProvider.getNetwork();
+
+          // Load fresh contract instances
+          const freshTokens = await loadTokens(freshProvider, chainId, dispatch);
+          const freshDBank = await loadBank(freshProvider, chainId, dispatch);
+
+          // Now load balances with fresh contracts
+          if (freshDBank && freshTokens && freshTokens.length > 0) {
+            await loadBalances(freshDBank, freshTokens, newAccount, dispatch);
+          }
+        } catch (error) {
+          console.error('Error loading balances after account change:', error);
+        }
       } else {
         dispatch(setAccount(null));
       }
@@ -96,9 +109,10 @@ function App() {
 
         // Try to get existing accounts without forcing a popup
         const existingAccounts = await window.ethereum.request({ method: 'eth_accounts' });
+        let currentAccount = null;
         if (existingAccounts && existingAccounts.length > 0) {
-          const account = ethers.utils.getAddress(existingAccounts[0]);
-          dispatch(setAccount(account));
+          currentAccount = ethers.utils.getAddress(existingAccounts[0]);
+          dispatch(setAccount(currentAccount));
         }
 
         // Register event listeners
@@ -113,8 +127,8 @@ function App() {
         await loadConfigManager(provider, chainId, dispatch);
 
         // Load balances/shares if account already connected
-        if (account && tokensContracts && tokensContracts.length > 0 && dBankContract) {
-          await loadBalances(dBankContract, tokensContracts, account, dispatch);
+        if (currentAccount && tokensContracts && tokensContracts.length > 0 && dBankContract) {
+          await loadBalances(dBankContract, tokensContracts, currentAccount, dispatch);
         }
       } catch (error) {
         console.error('Error loading blockchain data:', error);

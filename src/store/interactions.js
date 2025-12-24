@@ -3,13 +3,15 @@ import { ethers } from 'ethers'
 import { 
     setAccount,
     setProvider,
-    setNetwork
+    setNetwork,
+    provider
 } from './reducers/provider';
 
 import { 
     setContracts,
     setSymbols,
-    balancesLoaded,    
+    balancesLoaded,
+    tokens,    
 } from './reducers/tokens';
 
 import {
@@ -17,6 +19,10 @@ import {
     setSymbol,
     setAssets,
     sharesLoaded, 
+    setTotalSupply,
+    depositRequest,
+    depositSuccess,
+    depositFail,
 } from './reducers/dBank';
 
 import {
@@ -68,6 +74,7 @@ import CONFIG_MANAGER_ABI from '../abis/ConfigManager.json'
 import MOCK_S1_ABI from '../abis/MockS1.json'
 
 import config from '../config.json'
+
 
 export const loadProvider = (dispatch) => {
     // Use 'any' to allow seamless network switching without provider invalidation
@@ -328,10 +335,57 @@ export const loadBalances = async(dBank, tokens, account, dispatch) => {
     ]))
 
     const totalAssets = await dBank.totalAssets()
-    const shares = await dBank.convertToShares(totalAssets)
+    const totalSupply = await dBank.totalSupply()
+    const shares = await dBank.balanceOf(account)
     dispatch(setAssets(ethers.utils.formatUnits(totalAssets.toString(), 'ether')))
+    dispatch(setTotalSupply(ethers.utils.formatUnits(totalSupply.toString(), 'ether')))
     dispatch(sharesLoaded(ethers.utils.formatUnits(shares.toString(), 'ether')))
 
-    return { usdcBalance, shares }
+    return { usdcBalance, shares, totalAssets, totalSupply }
 }
+// ----------------------------------------------------------
+// DEPOSIT FUNDS
+export const depositFunds = async (provider, dBank, tokens, account, usdcAmount, dispatch) => {
+    try {
+        dispatch(depositRequest());
 
+        const signer = provider.getSigner();
+        const amountInWei = ethers.utils.parseUnits(usdcAmount, 18);
+
+        // Get token contract with sigher (for write operations)
+        const tokenWithSigner = tokens[0].connect(signer);
+        const dBankWIthSigner = dBank.connect(signer);
+
+        // Step 1. Check current allowance
+        const currentAllowance = await tokens[0].allowance(account, dBank.address);
+
+        // Step 2: If allowance insufficient, request approval
+        if (currentAllowance.lt(amountInWei)) {
+            dispatch(depositRequest());
+
+            const approveTx = await tokenWithSigner.approve(dBank.address, amountInWei);
+            await approveTx.wait(); // Wait for confirmation
+
+            dispatch(depositSuccess(approveTx.hash));
+        }
+
+        // Step 3. Execute deposit
+        dispatch(depositRequest());
+
+        const depositTx = await dBankWIthSigner.deposit(amountInWei, account);
+        await depositTx.wait(); // Wait for confirmation
+
+        dispatch(depositSuccess(depositTx.hash));
+        
+        // Step 4. Refresh balances
+        await loadBalances(dBank, tokens, account, dispatch);
+
+        dispatch(depositSuccess(depositTx.hash));
+
+        return true;
+
+    } catch (error) {
+        dispatch(depositFail(error.message));
+        return false;
+    }
+}

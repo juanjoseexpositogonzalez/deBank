@@ -7,6 +7,12 @@ export const dBank = createSlice({
         symbol: null,
         assets: [],
         shares: [],
+        totalSupply: 0,
+        depositing: {
+            isDepositing: false,
+            isSuccess: false,
+            transactionHash: null,
+        },
     },
     reducers: {
         setContract: (state, action) => {
@@ -21,6 +27,24 @@ export const dBank = createSlice({
         sharesLoaded: (state, action) => {
             state.shares = action.payload;
         },
+        setTotalSupply: (state, action) => {
+            state.totalSupply = action.payload;
+        },
+        depositRequest: (state, action) => {
+            state.depositing.isDepositing = true;
+            state.depositing.isSuccess = false;
+            state.depositing.transactionHash = null;
+        },
+        depositSuccess: (state, action) => {
+            state.depositing.isDepositing = false;
+            state.depositing.isSuccess = true;
+            state.depositing.transactionHash = action.payload;
+        },
+        depositFail: (state, action) => {
+            state.depositing.isDepositing = false;
+            state.depositing.isSuccess = false;
+            state.depositing.transactionHash = null;
+        },
     }
 })
 
@@ -29,6 +53,10 @@ export const {
     setSymbol,
     setAssets,
     sharesLoaded,
+    setTotalSupply,
+    depositRequest,
+    depositSuccess,
+    depositFail,
 } = dBank.actions;
 
 export default dBank.reducer;
