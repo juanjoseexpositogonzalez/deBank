@@ -1,3 +1,12 @@
+/* Variables de color */
+:root {
+  --text-primary: #f0d78c;      /* Amarillo suave */
+  --text-secondary: #d4b85a;    /* Amarillo más oscuro para acentos */
+  --text-accent: #A72BFB;       /* Violeta vivo para Balance/Shares */
+  --card-bg: rgba(0, 0, 0, 0.6); /* Fondo cards semi-transparente */
+  --card-border: rgba(240, 215, 140, 0.3); /* Borde sutil */
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -5,6 +14,128 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color: var(--text-primary);
+
+  /* Background - cambia 'blue' por 'dark' para probar el otro */
+  background-image: url('./assets/background-blue.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+/* Cards transparentes */
+.card {
+  background-color: var(--card-bg) !important;
+  border: 1px solid var(--card-border) !important;
+  backdrop-filter: blur(10px);
+}
+
+/* Textos dentro de cards (excepto .text-muted) */
+.card, .card *:not(.text-muted) {
+  color: var(--text-primary) !important;
+}
+
+/* Inputs */
+.form-control {
+  background-color: rgba(0, 0, 0, 0.4) !important;
+  border: 1px solid var(--card-border) !important;
+  color: var(--text-primary) !important;
+}
+
+.form-control::placeholder {
+  color: rgba(240, 215, 140, 0.5) !important;
+}
+
+.form-control:focus {
+  background-color: rgba(0, 0, 0, 0.5) !important;
+  border-color: var(--text-secondary) !important;
+  box-shadow: 0 0 0 0.2rem rgba(240, 215, 140, 0.25) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Input group (el addon con el símbolo) */
+.input-group-text {
+  background-color: rgba(0, 0, 0, 0.5) !important;
+  border: 1px solid var(--card-border) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Botones */
+.btn-primary {
+  background-color: var(--text-secondary) !important;
+  border-color: var(--text-secondary) !important;
+  color: #1a1a2e !important;
+}
+
+.btn-primary:hover {
+  background-color: var(--text-primary) !important;
+  border-color: var(--text-primary) !important;
+}
+
+.btn-primary:disabled {
+  background-color: rgba(212, 184, 90, 0.5) !important;
+  border-color: rgba(212, 184, 90, 0.5) !important;
+}
+
+/* Navbar - completamente transparente */
+.navbar {
+  background-color: transparent !important;
+}
+
+.navbar-brand, .nav-link {
+  color: var(--text-primary) !important;
+}
+
+.nav-link:hover {
+  color: var(--text-secondary) !important;
+}
+
+/* Número de cuenta / wallet address */
+.navbar-text, .navbar span, .navbar .account-address {
+  color: var(--text-primary) !important;
+}
+
+/* Botón Connect */
+.navbar .btn {
+  background-color: var(--text-secondary) !important;
+  border-color: var(--text-secondary) !important;
+  color: #1a1a2e !important;
+}
+
+.navbar .btn:hover {
+  background-color: var(--text-primary) !important;
+  border-color: var(--text-primary) !important;
+}
+
+/* Select de red */
+.form-select {
+  background-color: rgba(0, 0, 0, 0.4) !important;
+  border: 1px solid var(--card-border) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Tabs */
+.nav-tabs .nav-link {
+  color: var(--text-primary) !important;
+  border-color: transparent !important;
+}
+
+.nav-tabs .nav-link.active {
+  background-color: var(--card-bg) !important;
+  border-color: var(--card-border) !important;
+  color: var(--text-secondary) !important;
+}
+
+/* Textos muted (Balance, Shares) */
+.text-muted {
+  color: var(--text-accent) !important;
+}
+
+/* Links (como Max) */
+a, .card span[style*="cursor: pointer"] {
+  color: var(--text-secondary) !important;
 }
 
 code {
