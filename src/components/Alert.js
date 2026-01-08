@@ -1,6 +1,6 @@
 import { Alert as BootstrapAlert } from 'react-bootstrap';
 
-const Alert = ({ message, transactionHash, variant, setShowAlert }) => {
+const Alert = ({ message, transactionHash, variant, setShowAlert, explorerBaseUrl }) => {
   return (
     <BootstrapAlert
       variant={variant}
@@ -13,9 +13,20 @@ const Alert = ({ message, transactionHash, variant, setShowAlert }) => {
       <hr />
 
       {transactionHash && (
-        <p>
-          {transactionHash.slice(0, 6) + '...' + transactionHash.slice(60, 66)}
-        </p>
+        explorerBaseUrl ? (
+          <a
+            href={`${explorerBaseUrl}${transactionHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-break"
+          >
+            {transactionHash.slice(0, 6) + '...' + transactionHash.slice(60, 66)}
+          </a>
+        ) : (
+          <p className="mb-0 text-break">
+            {transactionHash.slice(0, 6) + '...' + transactionHash.slice(60, 66)}
+          </p>
+        )
       )}
     </BootstrapAlert>
   );
