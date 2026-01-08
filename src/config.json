@@ -18,19 +18,19 @@
   },
   "11155111": {
       "token": {
-          "address": "0x53c7e1Cf2e0a7f9a210850660B3b27B711d973a2"
+          "address": "0x595Af03530428b3126EE4Aa208d715ca9072901f"
       },
       "dbank": {
-          "address": "0xfA7BC586D0a08B4541EAB0c0B7920F7ef3b833a9"
+          "address": "0x8f067248E7Ff4f330debc06Bfeebc440BCFA03BA"
       },
       "strategyRouter": {
-          "address": "0xa0AB612ddB722FF9e76B819225FDF5A10b1FC191"
+          "address": "0x0D8baD5ED7BFb4d100a9335e9Df001F846fBD354"
       },
       "configManager": {
-          "address": "0xB7f8570d47A1a7d29d894E557095Ac5da9783296"
+          "address": "0x71Af348e906Ef12443Bf500FA79993D093Ca424D"
       },
       "mockS1": {
-          "address": "0x469C01cC109389870418612a4D95746cab447F1F"
+          "address": "0x50227f0402667742A0d0BC8F1613f116596ad3c0"
       }
   }
 }
