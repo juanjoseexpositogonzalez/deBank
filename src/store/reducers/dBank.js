@@ -13,6 +13,11 @@ export const dBank = createSlice({
             isSuccess: false,
             transactionHash: null,
         },
+        withdrawing: {
+            isWithdrawing: false,
+            isSuccess: false,
+            transactionHash: null,
+        },
     },
     reducers: {
         setContract: (state, action) => {
@@ -50,6 +55,26 @@ export const dBank = createSlice({
             state.depositing.isDepositing = false;
             state.depositing.isSuccess = false;
             state.depositing.transactionHash = null;
+        },  
+        withdrawRequest: (state, action) => {
+            state.withdrawing.isWithdrawing = true;
+            state.withdrawing.isSuccess = false;
+            state.withdrawing.transactionHash = null;
+        },
+        withdrawApproveSuccess: (state, action) => {
+            state.withdrawing.isWithdrawing = true;
+            state.withdrawing.isSuccess = true;
+            state.withdrawing.transactionHash = action.payload || null;
+        },
+        withdrawSuccess: (state, action) => {
+            state.withdrawing.isWithdrawing = false;
+            state.withdrawing.isSuccess = true;
+            state.withdrawing.transactionHash = action.payload;
+        },
+        withdrawFail: (state, action) => {
+            state.withdrawing.isWithdrawing = false;
+            state.withdrawing.isSuccess = false;
+            state.withdrawing.transactionHash = null;
         },
     }
 })
@@ -64,6 +89,10 @@ export const {
     depositApproveSuccess,
     depositSuccess,
     depositFail,
+    withdrawRequest,
+    withdrawApproveSuccess,
+    withdrawSuccess,
+    withdrawFail,
 } = dBank.actions;
 
 export default dBank.reducer;
