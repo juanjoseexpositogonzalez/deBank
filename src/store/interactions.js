@@ -4,14 +4,14 @@ import {
     setAccount,
     setProvider,
     setNetwork,
-    provider
+    // provider
 } from './reducers/provider';
 
 import { 
     setContracts,
     setSymbols,
     balancesLoaded,
-    tokens,    
+    // tokens,    
 } from './reducers/tokens';
 
 import {
@@ -24,6 +24,10 @@ import {
     depositApproveSuccess,
     depositSuccess,
     depositFail,
+    withdrawRequest,
+    withdrawApproveSuccess,
+    withdrawSuccess,
+    withdrawFail,
 } from './reducers/dBank';
 
 import {
@@ -383,6 +387,34 @@ export const depositFunds = async (provider, dBank, tokens, account, usdcAmount,
 
     } catch (error) {
         dispatch(depositFail(error.message));
+        return false;
+    }
+}
+
+// ----------------------------------------------------------
+// WITHDRAW FUNDS
+export const withdrawFunds = async (provider, dBank, tokens, account, usdcAmount, dispatch) => {
+    try {
+        dispatch(withdrawRequest());
+
+        const signer = provider.getSigner();
+        const amountInWei = ethers.utils.parseUnits(usdcAmount, 18);
+
+        const dBankWithSigner = dBank.connect(signer);
+
+        // Optional phase marker to mirror deposit UX
+        dispatch(withdrawApproveSuccess(null));
+
+        const withdrawTx = await dBankWithSigner.withdraw(amountInWei, account, account);
+        await withdrawTx.wait();
+
+        dispatch(withdrawSuccess(withdrawTx.hash));
+
+        await loadBalances(dBank, tokens, account, dispatch);
+
+        return true;
+    } catch (error) {
+        dispatch(withdrawFail(error.message));
         return false;
     }
 }
