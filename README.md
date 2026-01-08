@@ -85,7 +85,22 @@ npx hardhat run scripts/deploy.js --network localhost
 
 # Verify contracts
 npx hardhat verify --network <network> <contract-address>
+
+# Seed data (balances/caps) using config.json addresses for the target chain
+npx hardhat run scripts/seed.js --network localhost   # o sepolia
 ```
+
+## 🌐 Frontend
+
+```bash
+npm run start
+# Abre http://localhost:3000 y selecciona la red (Hardhat o Sepolia)
+```
+
+## 🧭 Seeding y configuración de redes
+- Direcciones por red en `src/config.json` (31337 Hardhat, 11155111 Sepolia).
+- El script `scripts/seed.js` toma direcciones de `config.json` (o variables de entorno con las mismas keys `token`, `dbank`, `strategyRouter`, `configManager`, `mockS1`).
+- Montos/caps en Sepolia son reducidos por defecto; ajusta caps si necesitas depósitos mayores (ver `docs/SEED.md`).
 
 ## 📖 Learn More
 
