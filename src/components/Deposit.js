@@ -22,6 +22,7 @@ const Deposit = () => {
     const isDepositing = useSelector(state => state.dBank.depositing.isDepositing);
     const isDepositSuccess = useSelector(state => state.dBank.depositing.isSuccess);
     const transactionHash = useSelector(state => state.dBank.depositing.transactionHash);
+    const chainId = useSelector(state => state.provider.chainId);
     
     const provider = useSelector(state => state.provider.connection);
     const account = useSelector(state => state.provider.account);
@@ -33,6 +34,13 @@ const Deposit = () => {
     const dBank = useSelector(state => state.dBank.contract);
 
     const dispatch = useDispatch();
+
+    const explorerMap = {
+        1: 'https://etherscan.io/tx/',
+        11155111: 'https://sepolia.etherscan.io/tx/',
+        31337: '' // no public explorer for local
+    };
+    const explorerBaseUrl = explorerMap[chainId] || '';
 
     const amountHandler = async (e) => {
         const value = e.target.value;
@@ -250,24 +258,27 @@ const Deposit = () => {
                     transactionHash={null}
                     variant={'info'}
                     setShowAlert={setShowAlert}
+                    explorerBaseUrl={explorerBaseUrl}
                 />
-                ) : isDepositSuccess && showAlert ? (
+            ) : isDepositSuccess && showAlert ? (
                 <Alert
                     message={'Deposit Successful'}
                     transactionHash={transactionHash}
                     variant={'success'}
                     setShowAlert={setShowAlert}
+                    explorerBaseUrl={explorerBaseUrl}
                 />
-                ) : !isDepositSuccess && showAlert ? (
+            ) : !isDepositSuccess && showAlert ? (
                 <Alert
                     message={'Deposit Failed'}
                     transactionHash={null}
                     variant={'danger'}
                     setShowAlert={setShowAlert}
+                    explorerBaseUrl={explorerBaseUrl}
                 />
-                ) : (
+            ) : (
                 <></>
-                )}
+            )}
         </div>
     );
 }
