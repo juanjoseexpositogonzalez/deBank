@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { Card, Form, Button, InputGroup, Row, Spinner } from 'react-bootstrap';
+import { Card, Form, Button, InputGroup, Row, Spinner, Table } from 'react-bootstrap';
 import { ethers } from 'ethers';
 
 import Alert from './Alert';
@@ -14,6 +14,19 @@ const formatBn = (bn) => {
   }
 };
 
+const toWei = (v) => {
+  try {
+    if (!v) return ethers.BigNumber.from(0);
+    if (Array.isArray(v)) return ethers.BigNumber.from(0);
+    if (ethers.BigNumber.isBigNumber(v)) return v;
+    const asString = String(v);
+    if (asString.includes('.')) return ethers.utils.parseUnits(asString, 18);
+    return ethers.BigNumber.from(asString);
+  } catch {
+    return ethers.BigNumber.from(0);
+  }
+};
+
 const Strategies = () => {
   const dispatch = useDispatch();
 
@@ -23,6 +36,12 @@ const Strategies = () => {
   const tokens = useSelector(state => state.tokens.contracts);
 
   const userShares = useSelector(state => state.dBank.shares) || "0";
+  const userSharesStr = useMemo(() => {
+    if (!userShares) return '0';
+    if (Array.isArray(userShares)) return '0';
+    if (ethers.BigNumber.isBigNumber(userShares)) return ethers.utils.formatUnits(userShares, 18);
+    return String(userShares);
+  }, [userShares]);
 
   const strategyRouter = useSelector(state => state.strategyRouter.contract);
   const strategies = useSelector(state => state.strategyRouter.strategies) || [];
@@ -30,6 +49,8 @@ const Strategies = () => {
   const strategyAllocated = useSelector(state => state.strategyRouter.strategyAllocated) || [];
   const strategyPaused = useSelector(state => state.strategyRouter.strategyPaused) || [];
   const strategyActive = useSelector(state => state.strategyRouter.strategyActive) || [];
+  const symbols = useSelector(state => state.tokens.symbols) || [];
+  const totalAllocated = useSelector(state => state.strategyRouter.totalAllocated);
 
   const [selectedId, setSelectedId] = useState('');
   const [amount, setAmount] = useState('');
@@ -49,6 +70,13 @@ const Strategies = () => {
   // Stable refs for useMemo deps
   const capsMemo = useMemo(() => strategyCap || [], [strategyCap]);
   const allocatedMemo = useMemo(() => strategyAllocated || [], [strategyAllocated]);
+  const totalAllocatedWei = useMemo(() => {
+    try {
+      return ethers.BigNumber.from(totalAllocated || 0);
+    } catch {
+      return ethers.BigNumber.from(0);
+    }
+  }, [totalAllocated]);
 
   const remainingForSelected = useMemo(() => {
     if (!selectedId) return '0';
@@ -68,7 +96,7 @@ const Strategies = () => {
   const maxAlloc = useMemo(() => {
     // For allocate: min(user shares, remaining cap)
     try {
-      const userWei = ethers.utils.parseUnits(userShares || '0', 18);
+      const userWei = ethers.utils.parseUnits(userSharesStr || '0', 18);
       const remainingWei = ethers.utils.parseUnits(remainingForSelected || '0', 18);
       const minWei = userWei.lt(remainingWei) ? userWei : remainingWei;
       return ethers.utils.formatUnits(minWei, 18);
@@ -122,13 +150,20 @@ const Strategies = () => {
     return active && !paused;
   });
 
+  // Auto-select first available strategy if none selected
+  useEffect(() => {
+    if (!selectedId && filteredStrategies.length === 1) {
+      setSelectedId(String(filteredStrategies[0].id));
+    }
+  }, [filteredStrategies, selectedId]);
+
   return (
     <Card style={{ maxWidth: '550px'}} className='mx-auto px-4 my-4'>
       <Form onSubmit={handleSubmit} style={{ maxWidht: '550px', margin: '20px auto'}}>
 
         <Row className='my-2 text-end'>
           <Form.Text muted>
-            Total shares: {userShares || '0'} | Remaining cap (selected): {remainingForSelected || '0'} | Max alloc: {maxAlloc || '0'} | Max unalloc: {maxUnallocate || '0'}
+            Total shares: {userShares || '0'} | Remaining cap (selected): {selectedId ? (remainingForSelected || '0') : '—'} | Max alloc: {selectedId ? (maxAlloc || '0') : '—'} | Max unalloc: {selectedId ? (maxUnallocate || '0') : '—'}
           </Form.Text>
         </Row>
 
@@ -242,6 +277,46 @@ const Strategies = () => {
       ) : (
         <></>
       )}
+
+      {/* Summary Table */}
+      <div className="mt-4">
+        <h6>Allocations</h6>
+        <Table striped bordered hover size="sm" responsive>
+          <thead>
+            <tr>
+              <th>Strategy</th>
+              <th>Shares</th>
+              <th>{symbols && symbols[0] ? symbols[0] : 'USDC'}</th>
+              <th>% of your shares</th>
+            </tr>
+          </thead>
+          <tbody>
+            {strategies.length === 0 && (
+              <tr>
+                <td colSpan={4} className="text-center">No strategies loaded</td>
+              </tr>
+            )}
+            {strategies.map((s, idx) => {
+              const alloc = formatBn(allocatedMemo[idx] || 0);
+              const allocUsd = alloc; // Assuming allocated is in asset units
+              const allocWei = toWei(allocatedMemo[idx]);
+              const userSharesWei = toWei(ethers.utils.parseUnits(userShares || '0', 18));
+              const pctBps = userSharesWei.gt(0)
+                ? allocWei.mul(ethers.BigNumber.from(10000)).div(userSharesWei) // basis points vs user total shares
+                : ethers.BigNumber.from(0);
+              const pctStr = ethers.utils.formatUnits(pctBps, 2); // two decimals, already %
+              return (
+                <tr key={s.id || idx}>
+                  <td>{`Strategy ${s.id}`}</td>
+                  <td>{alloc}</td>
+                  <td>{allocUsd}</td>
+                  <td>{pctStr}%</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </Table>
+      </div>
     </Card>
   );
 };
