@@ -418,3 +418,61 @@ export const withdrawFunds = async (provider, dBank, tokens, account, usdcAmount
         return false;
     }
 }
+
+// ----------------------------------------------------------
+// ALLOCATE TO STRATEGY (StrategyRouter.depositToStrategy)
+export const allocateToStrategy = async (provider, strategyRouter, tokens, account, amount, strategyId, dispatch) => {
+    try {
+        const signer = provider.getSigner();
+        const amountInWei = ethers.utils.parseUnits(amount, 18);
+
+        const tokenWithSigner = tokens[0].connect(signer);
+        const routerWithSigner = strategyRouter.connect(signer);
+
+        // Check allowance to router
+        const currentAllowance = await tokens[0].allowance(account, strategyRouter.address);
+        if (currentAllowance.lt(amountInWei)) {
+            const approveTx = await tokenWithSigner.approve(strategyRouter.address, amountInWei);
+            await approveTx.wait();
+        }
+
+        // Deposit to strategy
+        const tx = await routerWithSigner.depositToStrategy(strategyId, amountInWei);
+        await tx.wait();
+
+        // Refresh strategy state
+        await loadStrategyRouter(provider, (await provider.getNetwork()).chainId, dispatch);
+
+        return true;
+    } catch (error) {
+        console.error("allocateToStrategy error:", error);
+        return false;
+    }
+}
+
+// ----------------------------------------------------------
+// UN-ALLOCATE FROM STRATEGY (StrategyRouter.withdrawFromStrategy)
+export const unallocateFromStrategy = async (provider, strategyRouter, tokens, account, amount, strategyId, dispatch, maxSlippageBps = 50) => {
+    try {
+        const signer = provider.getSigner();
+        const amountInWei = ethers.utils.parseUnits(amount, 18);
+
+        const routerWithSigner = strategyRouter.connect(signer);
+
+        // Ensure router holds tokens to return; approval not required for withdrawFromStrategy
+        const routerBalance = await tokens[0].balanceOf(strategyRouter.address);
+        if (routerBalance.lt(amountInWei)) {
+            console.warn('Router balance lower than requested un-allocation; call may revert.');
+        }
+
+        const tx = await routerWithSigner.withdrawFromStrategy(strategyId, amountInWei, maxSlippageBps);
+        await tx.wait();
+
+        await loadStrategyRouter(provider, (await provider.getNetwork()).chainId, dispatch);
+
+        return true;
+    } catch (error) {
+        console.error("unallocateFromStrategy error:", error);
+        return false;
+    }
+}
