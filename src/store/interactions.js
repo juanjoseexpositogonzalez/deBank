@@ -443,10 +443,10 @@ export const allocateToStrategy = async (provider, strategyRouter, tokens, accou
         // Refresh strategy state
         await loadStrategyRouter(provider, (await provider.getNetwork()).chainId, dispatch);
 
-        return true;
+        return { ok: true, hash: tx.hash };
     } catch (error) {
         console.error("allocateToStrategy error:", error);
-        return false;
+        return { ok: false, hash: null, error: error.message };
     }
 }
 
@@ -470,9 +470,9 @@ export const unallocateFromStrategy = async (provider, strategyRouter, tokens, a
 
         await loadStrategyRouter(provider, (await provider.getNetwork()).chainId, dispatch);
 
-        return true;
+        return { ok: true, hash: tx.hash };
     } catch (error) {
         console.error("unallocateFromStrategy error:", error);
-        return false;
+        return { ok: false, hash: null, error: error.message };
     }
 }

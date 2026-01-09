@@ -132,16 +132,24 @@ const Strategies = () => {
     setTxHash(null);
 
     let ok = false;
+    let hash = null;
     if (mode === 'allocate') {
-      ok = await allocateToStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch);
+      const res = await allocateToStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch);
+      ok = res.ok;
+      hash = res.hash || null;
     } else {
-      ok = await unallocateFromStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch, 50);
+      const res = await unallocateFromStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch, 50);
+      ok = res.ok;
+      hash = res.hash || null;
     }
 
     setIsAllocating(false);
     setIsSuccess(ok);
+    setTxHash(hash);
     setShowAlert(true);
-    // tx hash is not returned; we logged none. Could be enhanced to return it from interaction
+    if (ok) {
+      setAmount('');
+    }
   };
 
   const filteredStrategies = strategies.filter((s, idx) => {
@@ -250,33 +258,35 @@ const Strategies = () => {
         </Row>
       </Form>
 
-      {isAllocating ? (
-        <Alert
-          message={'Allocation Pending...'}
-          transactionHash={txHash}
-          variant={'info'}
-          setShowAlert={setShowAlert}
-          explorerBaseUrl={explorerBaseUrl}
-        />
-      ) : isSuccess && showAlert ? (
-        <Alert
-          message={'Allocation Successful'}
-          transactionHash={txHash}
-          variant={'success'}
-          setShowAlert={setShowAlert}
-          explorerBaseUrl={explorerBaseUrl}
-        />
-      ) : !isSuccess && showAlert ? (
-        <Alert
-          message={'Allocation Failed'}
-          transactionHash={txHash}
-          variant={'danger'}
-          setShowAlert={setShowAlert}
-          explorerBaseUrl={explorerBaseUrl}
-        />
-      ) : (
-        <></>
-      )}
+      <div className="mt-2">
+        {isAllocating ? (
+          <Alert
+            message={'Allocation Pending...'}
+            transactionHash={txHash}
+            variant={'info'}
+            setShowAlert={setShowAlert}
+            explorerBaseUrl={explorerBaseUrl}
+          />
+        ) : isSuccess && showAlert ? (
+          <Alert
+            message={'Allocation Successful'}
+            transactionHash={txHash}
+            variant={'success'}
+            setShowAlert={setShowAlert}
+            explorerBaseUrl={explorerBaseUrl}
+          />
+        ) : !isSuccess && showAlert ? (
+          <Alert
+            message={'Allocation Failed'}
+            transactionHash={txHash}
+            variant={'danger'}
+            setShowAlert={setShowAlert}
+            explorerBaseUrl={explorerBaseUrl}
+          />
+        ) : (
+          <></>
+        )}
+      </div>
 
       {/* Summary Table */}
       <div className="mt-4">
