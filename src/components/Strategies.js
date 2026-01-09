@@ -94,16 +94,18 @@ const Strategies = () => {
   }, [selectedId, capsMemo, allocatedMemo]);
 
   const maxAlloc = useMemo(() => {
-    // For allocate: min(user shares, remaining cap)
+    // For allocate: min(unallocated user shares, remaining cap)
     try {
       const userWei = ethers.utils.parseUnits(userSharesStr || '0', 18);
+      const allocatedSumWei = allocatedMemo.reduce((acc, v) => acc.add(toWei(v)), ethers.BigNumber.from(0));
+      const unallocatedWei = userWei.gt(allocatedSumWei) ? userWei.sub(allocatedSumWei) : ethers.BigNumber.from(0);
       const remainingWei = ethers.utils.parseUnits(remainingForSelected || '0', 18);
-      const minWei = userWei.lt(remainingWei) ? userWei : remainingWei;
+      const minWei = unallocatedWei.lt(remainingWei) ? unallocatedWei : remainingWei;
       return ethers.utils.formatUnits(minWei, 18);
     } catch {
       return '0';
     }
-  }, [userShares, remainingForSelected]);
+  }, [userSharesStr, remainingForSelected, allocatedMemo]);
 
   const maxUnallocate = useMemo(() => {
     // Max withdraw = allocated for that strategy
@@ -125,6 +127,16 @@ const Strategies = () => {
     e.preventDefault();
     if (!provider || !strategyRouter || !tokens || tokens.length === 0 || !selectedId) return;
     if (!amount || parseFloat(amount) <= 0) return;
+
+    // Pre-checks against max allowed
+    const maxAllowedFloat = parseFloat(maxAlloc || '0');
+    if (mode === 'allocate' && parseFloat(amount) > maxAllowedFloat) {
+      setShowAlert(true);
+      setIsAllocating(false);
+      setIsSuccess(false);
+      setTxHash(null);
+      return;
+    }
 
     setShowAlert(false);
     setIsAllocating(true);
@@ -258,10 +270,10 @@ const Strategies = () => {
         </Row>
       </Form>
 
-      <div className="mt-2">
+      <div className="mt-3 w-100" style={{ maxWidth: '520px' }}>
         {isAllocating ? (
           <Alert
-            message={'Allocation Pending...'}
+            message={mode === 'allocate' ? 'Allocation Pending...' : 'Unallocation Pending...'}
             transactionHash={txHash}
             variant={'info'}
             setShowAlert={setShowAlert}
@@ -269,7 +281,7 @@ const Strategies = () => {
           />
         ) : isSuccess && showAlert ? (
           <Alert
-            message={'Allocation Successful'}
+            message={mode === 'allocate' ? 'Allocation Successful' : 'Unallocation Successful'}
             transactionHash={txHash}
             variant={'success'}
             setShowAlert={setShowAlert}
