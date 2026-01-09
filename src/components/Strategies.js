@@ -16,10 +16,11 @@ const formatBn = (bn) => {
 
 const toWei = (v) => {
   try {
-    if (!v) return ethers.BigNumber.from(0);
+    if (v === null || v === undefined) return ethers.BigNumber.from(0);
     if (Array.isArray(v)) return ethers.BigNumber.from(0);
     if (ethers.BigNumber.isBigNumber(v)) return v;
     const asString = String(v);
+    if (!asString || asString === 'undefined') return ethers.BigNumber.from(0);
     if (asString.includes('.')) return ethers.utils.parseUnits(asString, 18);
     return ethers.BigNumber.from(asString);
   } catch {
@@ -40,7 +41,8 @@ const Strategies = () => {
     if (!userShares) return '0';
     if (Array.isArray(userShares)) return '0';
     if (ethers.BigNumber.isBigNumber(userShares)) return ethers.utils.formatUnits(userShares, 18);
-    return String(userShares);
+    const s = String(userShares);
+    return s && s !== 'undefined' ? s : '0';
   }, [userShares]);
 
   const strategyRouter = useSelector(state => state.strategyRouter.contract);
