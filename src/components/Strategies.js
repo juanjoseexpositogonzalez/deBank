@@ -180,168 +180,169 @@ const Strategies = () => {
   }, [filteredStrategies, selectedId]);
 
   return (
-    <Card style={{ maxWidth: '550px'}} className='mx-auto px-4 my-4'>
-      <Form onSubmit={handleSubmit} style={{ maxWidht: '550px', margin: '20px auto'}}>
+       <div>
+        <Card style={{ maxWidth: '550px', width: '100%'}} className='mx-auto px-4 my-4'>
+        <Form onSubmit={handleSubmit} style={{ maxWidht: '550px', margin: '20px auto'}}>
 
-        <Row className='my-2 text-end'>
-          <Form.Text muted>
-            Total shares: {userShares || '0'} | Remaining cap (selected): {selectedId ? (remainingForSelected || '0') : '—'} | Max alloc: {selectedId ? (maxAlloc || '0') : '—'} | Max unalloc: {selectedId ? (maxUnallocate || '0') : '—'}
-          </Form.Text>
-        </Row>
-
-        <Row className='my-3'>
-          <Form.Label>Strategy</Form.Label>
-          <Form.Select
-            aria-label="Strategy Selector"
-            value={selectedId}
-            onChange={(e) => { setSelectedId(e.target.value); setAmount(''); }}
-          >
-            <option value="">Select strategy</option>
-            {filteredStrategies.map((s, idx) => (
-              <option key={s.id} value={s.id}>
-                {`Strategy ${s.id} (${s.address.slice(0,6)}...${s.address.slice(-4)})`}
-              </option>
-            ))}
-          </Form.Select>
-          {selectedId && (
-            <Form.Text muted className="mt-1">
-              Cap: {formatBn(capsMemo[Number(selectedId)-1] || 0)} | Allocated: {formatBn(allocatedMemo[Number(selectedId)-1] || 0)} | Remaining: {remainingForSelected}
+          <Row className='my-2 text-end'>
+            <Form.Text muted>
+              Total shares: {userShares || '0'} | Remaining cap (selected): {selectedId ? (remainingForSelected || '0') : '—'} | Max alloc: {selectedId ? (maxAlloc || '0') : '—'} | Max unalloc: {selectedId ? (maxUnallocate || '0') : '—'}
             </Form.Text>
-          )}
-        </Row>
+          </Row>
 
-        <Row className='my-3'>
-          <Form.Label>Action</Form.Label>
-          <Form.Select
-            aria-label="Mode selector"
-            value={mode}
-            onChange={(e) => { setMode(e.target.value); setAmount(''); }}
-          >
-            <option value="allocate">Allocate</option>
-            <option value="unallocate">Un-allocate</option>
-          </Form.Select>
-        </Row>
-
-        <Row className='my-3'>
-          <Form.Label>Shares to {mode === 'allocate' ? 'allocate' : 'un-allocate'}</Form.Label>
-          <InputGroup>
-            <Form.Control
-              type='number'
-              placeholder='0.0'
-              min='0.0'
-              step="any"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              disabled={!selectedId}
-            />
-            <Button
-              variant='outline-primary'
-              onClick={handleMax}
-              disabled={
-                !selectedId ||
-                (mode === 'allocate'
-                  ? parseFloat(maxAlloc || '0') === 0
-                  : parseFloat(maxUnallocate || '0') === 0)
-              }
+          <Row className='my-3'>
+            <Form.Label>Strategy</Form.Label>
+            <Form.Select
+              aria-label="Strategy Selector"
+              value={selectedId}
+              onChange={(e) => { setSelectedId(e.target.value); setAmount(''); }}
             >
-              Max
-            </Button>
-          </InputGroup>
-          <Form.Text muted className='mt-1'>
-            {mode === 'allocate'
-              ? 'Will allocate up to the lesser of your shares and the strategy remaining cap.'
-              : 'Will un-allocate up to the allocated amount in the selected strategy.'}
-          </Form.Text>
-        </Row>
-
-        <Row className='my-4'>
-          <Button
-            variant='primary'
-            type='submit'
-            disabled={!selectedId || !amount || parseFloat(amount) <= 0 || isAllocating}
-          >
-            {isAllocating ? (
-              <>
-                <Spinner as="span" animation="border" size="sm" className="me-2" />
-                {mode === 'allocate' ? 'Allocating ...' : 'Un-allocating ...'}
-              </>
-            ) : (
-              mode === 'allocate' ? "Allocate" : "Un-allocate"
+              <option value="">Select strategy</option>
+              {filteredStrategies.map((s, idx) => (
+                <option key={s.id} value={s.id}>
+                  {`Strategy ${s.id} (${s.address.slice(0,6)}...${s.address.slice(-4)})`}
+                </option>
+              ))}
+            </Form.Select>
+            {selectedId && (
+              <Form.Text muted className="mt-1">
+                Cap: {formatBn(capsMemo[Number(selectedId)-1] || 0)} | Allocated: {formatBn(allocatedMemo[Number(selectedId)-1] || 0)} | Remaining: {remainingForSelected}
+              </Form.Text>
             )}
-          </Button>
-        </Row>
-      </Form>
+          </Row>
 
-      <div className="mt-3 w-100" style={{ maxWidth: '520px' }}>
-        {isAllocating ? (
-          <Alert
-            message={mode === 'allocate' ? 'Allocation Pending...' : 'Unallocation Pending...'}
-            transactionHash={txHash}
-            variant={'info'}
-            setShowAlert={setShowAlert}
-            explorerBaseUrl={explorerBaseUrl}
-          />
-        ) : isSuccess && showAlert ? (
-          <Alert
-            message={mode === 'allocate' ? 'Allocation Successful' : 'Unallocation Successful'}
-            transactionHash={txHash}
-            variant={'success'}
-            setShowAlert={setShowAlert}
-            explorerBaseUrl={explorerBaseUrl}
-          />
-        ) : !isSuccess && showAlert ? (
-          <Alert
-            message={'Allocation Failed'}
-            transactionHash={txHash}
-            variant={'danger'}
-            setShowAlert={setShowAlert}
-            explorerBaseUrl={explorerBaseUrl}
+          <Row className='my-3'>
+            <Form.Label>Action</Form.Label>
+            <Form.Select
+              aria-label="Mode selector"
+              value={mode}
+              onChange={(e) => { setMode(e.target.value); setAmount(''); }}
+            >
+              <option value="allocate">Allocate</option>
+              <option value="unallocate">Un-allocate</option>
+            </Form.Select>
+          </Row>
+
+          <Row className='my-3'>
+            <Form.Label>Shares to {mode === 'allocate' ? 'allocate' : 'un-allocate'}</Form.Label>
+            <InputGroup>
+              <Form.Control
+                type='number'
+                placeholder='0.0'
+                min='0.0'
+                step="any"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                disabled={!selectedId}
+              />
+              <Button
+                variant='outline-primary'
+                onClick={handleMax}
+                disabled={
+                  !selectedId ||
+                  (mode === 'allocate'
+                    ? parseFloat(maxAlloc || '0') === 0
+                    : parseFloat(maxUnallocate || '0') === 0)
+                }
+              >
+                Max
+              </Button>
+            </InputGroup>
+            <Form.Text muted className='mt-1'>
+              {mode === 'allocate'
+                ? 'Will allocate up to the lesser of your shares and the strategy remaining cap.'
+                : 'Will un-allocate up to the allocated amount in the selected strategy.'}
+            </Form.Text>
+          </Row>
+
+          <Row className='my-4'>
+            <Button
+              variant='primary'
+              type='submit'
+              disabled={!selectedId || !amount || parseFloat(amount) <= 0 || isAllocating}
+            >
+              {isAllocating ? (
+                <>
+                  <Spinner as="span" animation="border" size="sm" className="me-2" />
+                  {mode === 'allocate' ? 'Allocating ...' : 'Un-allocating ...'}
+                </>
+              ) : (
+                mode === 'allocate' ? "Allocate" : "Un-allocate"
+              )}
+            </Button>
+          </Row>
+        </Form>
+
+        {/* Summary Table */}
+        <div className="mt-4">
+          <h6>Allocations</h6>
+          <Table striped bordered hover size="sm" responsive>
+            <thead>
+              <tr>
+                <th>Strategy</th>
+                <th>Shares</th>
+                <th>{symbols && symbols[0] ? symbols[0] : 'USDC'}</th>
+                <th>% of your shares</th>
+              </tr>
+            </thead>
+            <tbody>
+              {strategies.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="text-center">No strategies loaded</td>
+                </tr>
+              )}
+              {strategies.map((s, idx) => {
+                const alloc = formatBn(allocatedMemo[idx] || 0);
+                const allocUsd = alloc; // Assuming allocated is in asset units
+                const allocWei = toWei(allocatedMemo[idx]);
+                const userSharesWei = toWei(ethers.utils.parseUnits(userShares || '0', 18));
+                const pctBps = userSharesWei.gt(0)
+                  ? allocWei.mul(ethers.BigNumber.from(10000)).div(userSharesWei) // basis points vs user total shares
+                  : ethers.BigNumber.from(0);
+                const pctStr = ethers.utils.formatUnits(pctBps, 2); // two decimals, already %
+                return (
+                  <tr key={s.id || idx}>
+                    <td>{`Strategy ${s.id}`}</td>
+                    <td>{alloc}</td>
+                    <td>{allocUsd}</td>
+                    <td>{pctStr}%</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        </div>
+      </Card>
+
+      
+      {isAllocating ? (
+        <Alert
+          message={mode === 'allocate' ? 'Allocation Pending...' : 'Unallocation Pending...'}
+          transactionHash={txHash}
+          variant={'info'}
+          setShowAlert={setShowAlert}
+          explorerBaseUrl={explorerBaseUrl}
+        />
+      ) : isSuccess && showAlert ? (
+        <Alert
+          message={mode === 'allocate' ? 'Allocation Successful' : 'Unallocation Successful'}
+          transactionHash={txHash}
+          variant={'success'}
+          setShowAlert={setShowAlert}
+          explorerBaseUrl={explorerBaseUrl}
+        />
+      ) : !isSuccess && showAlert ? (
+        <Alert
+          message={'Allocation Failed'}
+          transactionHash={txHash}
+          variant={'danger'}
+          setShowAlert={setShowAlert}
+          explorerBaseUrl={explorerBaseUrl}
           />
         ) : (
           <></>
-        )}
-      </div>
-
-      {/* Summary Table */}
-      <div className="mt-4">
-        <h6>Allocations</h6>
-        <Table striped bordered hover size="sm" responsive>
-          <thead>
-            <tr>
-              <th>Strategy</th>
-              <th>Shares</th>
-              <th>{symbols && symbols[0] ? symbols[0] : 'USDC'}</th>
-              <th>% of your shares</th>
-            </tr>
-          </thead>
-          <tbody>
-            {strategies.length === 0 && (
-              <tr>
-                <td colSpan={4} className="text-center">No strategies loaded</td>
-              </tr>
-            )}
-            {strategies.map((s, idx) => {
-              const alloc = formatBn(allocatedMemo[idx] || 0);
-              const allocUsd = alloc; // Assuming allocated is in asset units
-              const allocWei = toWei(allocatedMemo[idx]);
-              const userSharesWei = toWei(ethers.utils.parseUnits(userShares || '0', 18));
-              const pctBps = userSharesWei.gt(0)
-                ? allocWei.mul(ethers.BigNumber.from(10000)).div(userSharesWei) // basis points vs user total shares
-                : ethers.BigNumber.from(0);
-              const pctStr = ethers.utils.formatUnits(pctBps, 2); // two decimals, already %
-              return (
-                <tr key={s.id || idx}>
-                  <td>{`Strategy ${s.id}`}</td>
-                  <td>{alloc}</td>
-                  <td>{allocUsd}</td>
-                  <td>{pctStr}%</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </Table>
-      </div>
-    </Card>
+        )}  
+    </div>
   );
 };
 
