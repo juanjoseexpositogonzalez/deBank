@@ -58,12 +58,11 @@ const Strategies = () => {
 
   const strategyRouter = useSelector(state => state.strategyRouter.contract);
   const strategies = useSelector(state => state.strategyRouter.strategies) || [];
-  const strategyCap = useSelector(state => state.strategyRouter.strategyCap) || [];
-  const strategyAllocated = useSelector(state => state.strategyRouter.strategyAllocated) || [];
+  const strategyCap = useSelector(state => state.strategyRouter.strategyCap);
+  const strategyAllocated = useSelector(state => state.strategyRouter.strategyAllocated);
   const strategyPaused = useSelector(state => state.strategyRouter.strategyPaused) || [];
   const strategyActive = useSelector(state => state.strategyRouter.strategyActive) || [];
   const symbols = useSelector(state => state.tokens.symbols) || [];
-  const totalAllocated = useSelector(state => state.strategyRouter.totalAllocated);
 
   const [selectedId, setSelectedId] = useState('');
   const [amount, setAmount] = useState('');
@@ -83,13 +82,6 @@ const Strategies = () => {
   // Stable refs for useMemo deps
   const capsMemo = useMemo(() => strategyCap || [], [strategyCap]);
   const allocatedMemo = useMemo(() => strategyAllocated || [], [strategyAllocated]);
-  const totalAllocatedWei = useMemo(() => {
-    try {
-      return ethers.BigNumber.from(totalAllocated || 0);
-    } catch {
-      return ethers.BigNumber.from(0);
-    }
-  }, [totalAllocated]);
 
   const remainingForSelected = useMemo(() => {
     if (!selectedId) return '0';
