@@ -14,6 +14,17 @@ const formatBn = (bn) => {
   }
 };
 
+const formatWithMaxDecimals = (value, maxDecimals = 4) => {
+  try {
+    const num = parseFloat(value);
+    if (isNaN(num)) return '0';
+    // Remove trailing zeros
+    return num.toFixed(maxDecimals).replace(/\.?0+$/, '');
+  } catch {
+    return '0';
+  }
+};
+
 const toWei = (v) => {
   try {
     if (v === null || v === undefined) return ethers.BigNumber.from(0);
@@ -116,6 +127,12 @@ const Strategies = () => {
     return formatBn(allocatedMemo[idx] || 0);
   }, [selectedId, allocatedMemo]);
 
+  // Formatted values with max 4 decimals for display
+  const userSharesFormatted = useMemo(() => formatWithMaxDecimals(userSharesStr, 4), [userSharesStr]);
+  const remainingForSelectedFormatted = useMemo(() => formatWithMaxDecimals(remainingForSelected, 4), [remainingForSelected]);
+  const maxAllocFormatted = useMemo(() => formatWithMaxDecimals(maxAlloc, 4), [maxAlloc]);
+  const maxUnallocateFormatted = useMemo(() => formatWithMaxDecimals(maxUnallocate, 4), [maxUnallocate]);
+
   const handleMax = () => {
     if (!selectedId) return;
     if (mode === 'allocate') {
@@ -186,7 +203,7 @@ const Strategies = () => {
 
           <Row className='my-2 text-end'>
             <Form.Text muted>
-              Total shares: {userShares || '0'} | Remaining cap (selected): {selectedId ? (remainingForSelected || '0') : '—'} | Max alloc: {selectedId ? (maxAlloc || '0') : '—'} | Max unalloc: {selectedId ? (maxUnallocate || '0') : '—'}
+              Total shares: {userSharesFormatted} | Remaining cap (selected): {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
             </Form.Text>
           </Row>
 
@@ -206,7 +223,7 @@ const Strategies = () => {
             </Form.Select>
             {selectedId && (
               <Form.Text muted className="mt-1">
-                Cap: {formatBn(capsMemo[Number(selectedId)-1] || 0)} | Allocated: {formatBn(allocatedMemo[Number(selectedId)-1] || 0)} | Remaining: {remainingForSelected}
+                Cap: {formatWithMaxDecimals(formatBn(capsMemo[Number(selectedId)-1] || 0), 4)} | Allocated: {formatWithMaxDecimals(formatBn(allocatedMemo[Number(selectedId)-1] || 0), 4)} | Remaining: {remainingForSelectedFormatted}
               </Form.Text>
             )}
           </Row>
@@ -292,14 +309,16 @@ const Strategies = () => {
                 </tr>
               )}
               {strategies.map((s, idx) => {
-                const alloc = formatBn(allocatedMemo[idx] || 0);
+                const allocRaw = formatBn(allocatedMemo[idx] || 0);
+                const alloc = formatWithMaxDecimals(allocRaw, 4);
                 const allocUsd = alloc; // Assuming allocated is in asset units
                 const allocWei = toWei(allocatedMemo[idx]);
                 const userSharesWei = toWei(ethers.utils.parseUnits(userShares || '0', 18));
                 const pctBps = userSharesWei.gt(0)
                   ? allocWei.mul(ethers.BigNumber.from(10000)).div(userSharesWei) // basis points vs user total shares
                   : ethers.BigNumber.from(0);
-                const pctStr = ethers.utils.formatUnits(pctBps, 2); // two decimals, already %
+                const pctRaw = ethers.utils.formatUnits(pctBps, 2); // two decimals, already %
+                const pctStr = formatWithMaxDecimals(pctRaw, 4);
                 return (
                   <tr key={s.id || idx}>
                     <td>{`Strategy ${s.id}`}</td>
