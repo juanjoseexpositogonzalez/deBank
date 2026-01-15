@@ -285,19 +285,19 @@ const Strategies = () => {
         {/* Summary Table */}
         <div className="mt-4">
           <h6 style={{ color: '#f8f9fa' }}>Allocations</h6>
-          <Table bordered hover size="sm" responsive style={{ backgroundColor: 'transparent', color: '#f8f9fa' }}>
-            <thead style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)' }}>
-              <tr>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.1)' }}>Strategy</th>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.1)' }}>Shares</th>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.1)' }}>{symbols && symbols[0] ? symbols[0] : 'USDC'}</th>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.1)' }}>% of your shares</th>
+          <Table bordered size="sm" responsive style={{ backgroundColor: 'transparent', color: '#f8f9fa' }}>
+            <thead style={{ backgroundColor: 'transparent' }}>
+              <tr style={{ backgroundColor: 'transparent' }}>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', width: '30%' }}>Strategy</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>Shares</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{symbols && symbols[0] ? symbols[0] : 'USDC'}</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '30%' }}>% of your shares</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody style={{ backgroundColor: 'transparent' }}>
               {strategies.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="text-center" style={{ color: '#adb5bd', borderColor: 'rgba(255, 255, 255, 0.1)' }}>No strategies loaded</td>
+                <tr style={{ backgroundColor: 'transparent' }}>
+                  <td colSpan={4} className="text-center" style={{ color: '#adb5bd', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent' }}>No strategies loaded</td>
                 </tr>
               )}
               {strategies.map((s, idx) => {
@@ -312,11 +312,11 @@ const Strategies = () => {
                 const pctRaw = ethers.utils.formatUnits(pctBps, 2); // two decimals, already %
                 const pctStr = formatWithMaxDecimals(pctRaw, 4);
                 return (
-                  <tr key={s.id || idx}>
-                    <td>{`Strategy ${s.id}`}</td>
-                    <td>{alloc}</td>
-                    <td>{allocUsd}</td>
-                    <td>{pctStr}%</td>
+                  <tr key={s.id || idx} style={{ backgroundColor: 'transparent' }}>
+                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', width: '30%' }}>{`Strategy ${s.id}`}</td>
+                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{alloc}</td>
+                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{allocUsd}</td>
+                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'right', width: '30%' }}>{pctStr}%</td>
                   </tr>
                 );
               })}
