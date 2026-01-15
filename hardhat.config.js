@@ -10,21 +10,18 @@ module.exports = {
     sepolia: {
       url: `https://eth-sepolia.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
       accounts: privateKeys.split(":")
-    }
+    },
+    // hardhat: {
+    //   forking: {
+    //     url: `https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
+    //     blockNumber: 15500000
+    //   },
+    //   initialBaseFeePerGas: 1000000000 // 1 gwei
+    // }
   },
   etherscan: {
     apiKey: {
       sepolia: process.env.ETHERSCAN_API_KEY || ""
-    },
-    customChains: [
-      {
-        network: "sepolia",
-        chainId: 11155111,
-        urls: {
-          apiURL: "https://api.etherscan.io/v2/api",
-          browserURL: "https://sepolia.etherscan.io"
-        }
-      }
-    ]
-  }
+    }    
+  }  
 };
