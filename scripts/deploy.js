@@ -107,7 +107,7 @@ async function main() {
   // ============================================================
   // Optional verification (if ETHERSCAN_API_KEY is configured)
   // ============================================================
-  if (process.env.ETHERSCAN_API_KEY && hre.network.name !== "hardhat") {
+  if (process.env.ETHERSCAN_API_KEY && (hre.network.name !== "hardhat" && hre.network.name !== "localhost")) {
     console.log("Waiting for confirmations before verifying...");
     await token.deployTransaction.wait(5);
     await configManager.deployTransaction.wait(5);
