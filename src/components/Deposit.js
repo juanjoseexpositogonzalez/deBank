@@ -35,6 +35,23 @@ const Deposit = () => {
 
     const dispatch = useDispatch();
 
+    // Helper function to format numbers with max 4 decimals
+    const formatWithMaxDecimals = (value, maxDecimals = 4) => {
+        if (!value || value === "0" || parseFloat(value) === 0) return "0";
+        const num = parseFloat(value);
+        if (isNaN(num)) return "0";
+        
+        // If number has no decimals or very few, show as is
+        const str = num.toString();
+        const [, decimals] = str.split('.');
+        if (!decimals || decimals.length <= maxDecimals) {
+            return num.toString();
+        }
+        
+        // Otherwise, limit to maxDecimals
+        return num.toFixed(maxDecimals).replace(/\.?0+$/, '');
+    };
+
     const explorerMap = {
         1: 'https://etherscan.io/tx/',
         11155111: 'https://sepolia.etherscan.io/tx/',
@@ -153,7 +170,7 @@ const Deposit = () => {
                 <Form onSubmit={depositHandler} style={{ maxWidht: '450px', margin: '50px auto'}}>
                     <Row>
                         <Form.Text className='text-end my-2' muted>
-                            Balance: {balances[0] || "0"}
+                            Balance: {formatWithMaxDecimals(balances[0])}
                             {balances && balances[0] && parseFloat(balances[0]) > 0 && (
                                 <span
                                     onClick={maxHandlerBalance}
@@ -188,7 +205,7 @@ const Deposit = () => {
 
                     <Row className='my-3'>                        
                         <Form.Text className='text-end my-2' muted>
-                            Shares: {shares || "0"}
+                            Shares: {formatWithMaxDecimals(shares)}
                             {shares && parseFloat(shares) > 0 && (
                                 <span
                                     onClick={maxHandlerShares}
