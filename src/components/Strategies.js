@@ -190,17 +190,17 @@ const Strategies = () => {
 
   return (
        <div>
-        <Card style={{ maxWidth: '550px', width: '100%'}} className='mx-auto px-4 my-4'>
-        <Form onSubmit={handleSubmit} style={{ maxWidht: '550px', margin: '20px auto'}}>
+        <Card style={{ maxWidth: '650px', width: '100%'}} className='mx-auto px-4 my-4'>
+        <Form onSubmit={handleSubmit} style={{ maxWidth: '650px', margin: '20px auto'}}>
 
           <Row className='my-2 text-end'>
-            <Form.Text muted>
+            <Form.Text style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
               Total shares: {userSharesFormatted} | Remaining cap (selected): {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
             </Form.Text>
           </Row>
 
           <Row className='my-3'>
-            <Form.Label>Strategy</Form.Label>
+            <Form.Label style={{ color: '#f8f9fa' }}>Strategy</Form.Label>
             <Form.Select
               aria-label="Strategy Selector"
               value={selectedId}
@@ -214,14 +214,14 @@ const Strategies = () => {
               ))}
             </Form.Select>
             {selectedId && (
-              <Form.Text muted className="mt-1">
+              <Form.Text style={{ color: '#adb5bd', fontSize: '0.9rem' }} className="mt-1">
                 Cap: {formatWithMaxDecimals(formatBn(capsMemo[Number(selectedId)-1] || 0), 4)} | Allocated: {formatWithMaxDecimals(formatBn(allocatedMemo[Number(selectedId)-1] || 0), 4)} | Remaining: {remainingForSelectedFormatted}
               </Form.Text>
             )}
           </Row>
 
           <Row className='my-3'>
-            <Form.Label>Action</Form.Label>
+            <Form.Label style={{ color: '#f8f9fa' }}>Action</Form.Label>
             <Form.Select
               aria-label="Mode selector"
               value={mode}
@@ -233,7 +233,7 @@ const Strategies = () => {
           </Row>
 
           <Row className='my-3'>
-            <Form.Label>Shares to {mode === 'allocate' ? 'allocate' : 'un-allocate'}</Form.Label>
+            <Form.Label style={{ color: '#f8f9fa' }}>Shares to {mode === 'allocate' ? 'allocate' : 'un-allocate'}</Form.Label>
             <InputGroup>
               <Form.Control
                 type='number'
@@ -257,7 +257,7 @@ const Strategies = () => {
                 Max
               </Button>
             </InputGroup>
-            <Form.Text muted className='mt-1'>
+            <Form.Text style={{ color: '#adb5bd', fontSize: '0.9rem' }} className='mt-1'>
               {mode === 'allocate'
                 ? 'Will allocate up to the lesser of your shares and the strategy remaining cap.'
                 : 'Will un-allocate up to the allocated amount in the selected strategy.'}
@@ -284,20 +284,20 @@ const Strategies = () => {
 
         {/* Summary Table */}
         <div className="mt-4">
-          <h6>Allocations</h6>
-          <Table striped bordered hover size="sm" responsive>
-            <thead>
+          <h6 style={{ color: '#f8f9fa' }}>Allocations</h6>
+          <Table bordered hover size="sm" responsive style={{ backgroundColor: 'transparent', color: '#f8f9fa' }}>
+            <thead style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)' }}>
               <tr>
-                <th>Strategy</th>
-                <th>Shares</th>
-                <th>{symbols && symbols[0] ? symbols[0] : 'USDC'}</th>
-                <th>% of your shares</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.1)' }}>Strategy</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.1)' }}>Shares</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.1)' }}>{symbols && symbols[0] ? symbols[0] : 'USDC'}</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.1)' }}>% of your shares</th>
               </tr>
             </thead>
             <tbody>
               {strategies.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="text-center">No strategies loaded</td>
+                  <td colSpan={4} className="text-center" style={{ color: '#adb5bd', borderColor: 'rgba(255, 255, 255, 0.1)' }}>No strategies loaded</td>
                 </tr>
               )}
               {strategies.map((s, idx) => {
