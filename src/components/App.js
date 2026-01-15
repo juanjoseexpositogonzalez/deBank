@@ -13,7 +13,6 @@ import Strategies from './Strategies';
 import Charts from './Charts';
 
 import { 
-  loadAccount,
   loadProvider,
   loadNetwork,
   loadTokens,  
