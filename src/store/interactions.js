@@ -476,3 +476,13 @@ export const unallocateFromStrategy = async (provider, strategyRouter, tokens, a
         return { ok: false, hash: null, error: error.message };
     }
 }
+// ----------------------------------------------------------
+// LOAD STRATEGY RETURNS
+export const loadStrategyReturns = async (provider, strategyRouter, dispatch) => {
+    try {
+        const returns = await strategyRouter.getStrategyReturns();
+        // dispatch(setStrategyReturns(returns));
+    } catch (error) {
+        console.error("loadStrategyReturns error:", error);
+    }
+}
