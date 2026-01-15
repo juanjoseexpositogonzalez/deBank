@@ -150,7 +150,7 @@ const Withdraw = () => {
             {account ? (
                 <Form onSubmit={withdrawHandler} style={{ maxWidht: '450px', margin: '50px auto'}}>
                     <Row>
-                        <Form.Text className='text-end my-2' muted>
+                        <Form.Text className='text-end my-2' style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
                             Balance: {formatWithMaxDecimals(balances[0])}
                             {balances && balances[0] && parseFloat(balances[0]) > 0 && (
                                 <span
@@ -185,7 +185,7 @@ const Withdraw = () => {
                     </Row>
 
                     <Row className='my-3'>                        
-                        <Form.Text className='text-end my-2' muted>
+                        <Form.Text className='text-end my-2' style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
                             Shares: {formatWithMaxDecimals(shares)}
                             {shares && parseFloat(shares) > 0 && (
                                 <span
