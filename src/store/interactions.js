@@ -41,6 +41,8 @@ import {
     setStrategyCap,
     setStrategyAllocated,
     setTotalAllocated,
+    setUserStrategyAllocations,
+    setUserTotalAllocated,
 } from './reducers/strategyRouter';
 
 import {
@@ -258,6 +260,44 @@ export const loadStrategyRouter = async (provider, chainId, dispatch) => {
     dispatch(setStrategyAllocated(strategyAllocated));
 }
 
+// ----------------------------------------------------------
+// LOAD USER STRATEGY ALLOCATIONS
+export const loadUserStrategyAllocations = async (strategyRouter, account, dispatch) => {
+    if (!strategyRouter || !account) {
+        dispatch(setUserStrategyAllocations([]));
+        dispatch(setUserTotalAllocated("0"));
+        return;
+    }
+
+    try {
+        // Get total allocated by user
+        const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
+        const userTotalAllocated = ethers.utils.formatUnits(userTotalAllocatedBN, 18);
+        dispatch(setUserTotalAllocated(userTotalAllocated));
+
+        // Get allocations per strategy
+        const userAllocations = [];
+        const totalStrategiesBN = await strategyRouter.totalStrategies();
+        const totalStrategies = totalStrategiesBN.toNumber();
+        
+        for (let i = 1; i <= totalStrategies; i++) {
+            try {
+                const allocationBN = await strategyRouter.getUserStrategyAllocation(account, i);
+                const allocation = ethers.utils.formatUnits(allocationBN, 18);
+                userAllocations.push(allocation);
+            } catch (error) {
+                userAllocations.push("0");
+            }
+        }
+        
+        dispatch(setUserStrategyAllocations(userAllocations));
+    } catch (error) {
+        console.error("Error loading user strategy allocations:", error);
+        dispatch(setUserStrategyAllocations([]));
+        dispatch(setUserTotalAllocated("0"));
+    }
+}
+
 export const loadMockS1 = async (provider, chainId, dispatch) => {
     if (!config[chainId] || !config[chainId].mockS1 || !config[chainId].mockS1.address) {
         throw new Error(`MockS1 address not configured for chain ID ${chainId}`);
@@ -443,6 +483,9 @@ export const allocateToStrategy = async (provider, strategyRouter, tokens, accou
         // Refresh strategy state
         await loadStrategyRouter(provider, (await provider.getNetwork()).chainId, dispatch);
 
+        // Reload user allocations
+        await loadUserStrategyAllocations(strategyRouter, account, dispatch);
+
         return { ok: true, hash: tx.hash };
     } catch (error) {
         console.error("allocateToStrategy error:", error);
@@ -469,6 +512,9 @@ export const unallocateFromStrategy = async (provider, strategyRouter, tokens, a
         await tx.wait();
 
         await loadStrategyRouter(provider, (await provider.getNetwork()).chainId, dispatch);
+
+        // Reload user allocations
+        await loadUserStrategyAllocations(strategyRouter, account, dispatch);
 
         return { ok: true, hash: tx.hash };
     } catch (error) {

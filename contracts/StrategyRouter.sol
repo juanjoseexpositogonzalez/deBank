@@ -44,6 +44,9 @@ contract StrategyRouter {
     // Limits and caps
     mapping(uint256 => uint256) public strategyCap; // strategyId -> cap
     mapping(uint256 => uint256) public strategyAllocated; // strategyId -> allocated capital
+    
+    // User-specific allocations tracking
+    mapping(address => mapping(uint256 => uint256)) public userStrategyAllocations; // user -> strategyId -> allocated amount
 
     // Events
     event StrategyRegistered(uint256 indexed strategyId, address indexed strategy, uint256 cap);
@@ -182,6 +185,31 @@ contract StrategyRouter {
         return total;
     }
 
+    /**
+     * @notice Get total allocated capital for a specific user across all strategies
+     * @param _user User address
+     * @return Total allocated capital by user
+     */
+    function getUserTotalAllocated(address _user) external view returns (uint256) {
+        uint256 total = 0;
+        for (uint256 i = 1; i <= MAX_STRATEGIES; i++) {
+            if (strategies[i] != address(0)) {
+                total += userStrategyAllocations[_user][i];
+            }
+        }
+        return total;
+    }
+
+    /**
+     * @notice Get allocated capital for a specific user in a specific strategy
+     * @param _user User address
+     * @param _strategyId Strategy ID
+     * @return Allocated capital by user in strategy
+     */
+    function getUserStrategyAllocation(address _user, uint256 _strategyId) external view returns (uint256) {
+        return userStrategyAllocations[_user][_strategyId];
+    }
+
     // External Functions - Registration and Configuration
 
     /**
@@ -282,6 +310,9 @@ contract StrategyRouter {
         // Update allocated amount
         strategyAllocated[_strategyId] += _amount;
         
+        // Update user-specific allocation tracking
+        userStrategyAllocations[msg.sender][_strategyId] += _amount;
+        
         emit CapitalDeposited(_strategyId, _amount, strategyAllocated[_strategyId]);
         
         return _amount;
@@ -333,18 +364,29 @@ contract StrategyRouter {
             revert StrategyRouter__InsufficientLiquidity();
         }
         
-        // Update allocated amount
+        // Update allocated amount and store for emit
         uint256 currentAllocated = strategyAllocated[_strategyId];
+        uint256 newAllocated;
         if (actualAmount <= currentAllocated) {
-            strategyAllocated[_strategyId] = currentAllocated - actualAmount;
+            newAllocated = currentAllocated - actualAmount;
+            strategyAllocated[_strategyId] = newAllocated;
         } else {
+            newAllocated = 0;
             strategyAllocated[_strategyId] = 0;
+        }
+        
+        // Update user-specific allocation tracking
+        uint256 userAllocated = userStrategyAllocations[msg.sender][_strategyId];
+        if (actualAmount <= userAllocated) {
+            userStrategyAllocations[msg.sender][_strategyId] = userAllocated - actualAmount;
+        } else {
+            userStrategyAllocations[msg.sender][_strategyId] = 0;
         }
         
         // Transfer tokens to msg.sender
         require(token.transfer(msg.sender, actualAmount), "Transfer to sender failed");
         
-        emit CapitalWithdrawn(_strategyId, actualAmount, strategyAllocated[_strategyId]);
+        emit CapitalWithdrawn(_strategyId, actualAmount, newAllocated);
         
         return actualAmount;
     }

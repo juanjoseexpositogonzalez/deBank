@@ -63,6 +63,8 @@ const Strategies = () => {
   const strategyPaused = useSelector(state => state.strategyRouter.strategyPaused) || [];
   const strategyActive = useSelector(state => state.strategyRouter.strategyActive) || [];
   const symbols = useSelector(state => state.tokens.symbols) || [];
+  const userStrategyAllocations = useSelector(state => state.strategyRouter.userStrategyAllocations) || [];
+  const userTotalAllocated = useSelector(state => state.strategyRouter.userTotalAllocated) || "0";
 
   const [selectedId, setSelectedId] = useState('');
   const [amount, setAmount] = useState('');
@@ -102,22 +104,25 @@ const Strategies = () => {
     // For allocate: min(unallocated user shares, remaining cap)
     try {
       const userWei = ethers.utils.parseUnits(userSharesStr || '0', 18);
-      const allocatedSumWei = allocatedMemo.reduce((acc, v) => acc.add(toWei(v)), ethers.BigNumber.from(0));
-      const unallocatedWei = userWei.gt(allocatedSumWei) ? userWei.sub(allocatedSumWei) : ethers.BigNumber.from(0);
+      // Sum user's allocations across all strategies
+      const userAllocatedSumWei = userStrategyAllocations.reduce((acc, v) => {
+        return acc.add(toWei(v));
+      }, ethers.BigNumber.from(0));
+      const unallocatedWei = userWei.gt(userAllocatedSumWei) ? userWei.sub(userAllocatedSumWei) : ethers.BigNumber.from(0);
       const remainingWei = ethers.utils.parseUnits(remainingForSelected || '0', 18);
       const minWei = unallocatedWei.lt(remainingWei) ? unallocatedWei : remainingWei;
       return ethers.utils.formatUnits(minWei, 18);
     } catch {
       return '0';
     }
-  }, [userSharesStr, remainingForSelected, allocatedMemo]);
+  }, [userSharesStr, remainingForSelected, userStrategyAllocations]);
 
   const maxUnallocate = useMemo(() => {
-    // Max withdraw = allocated for that strategy
+    // Max withdraw = user's allocated amount for that strategy
     if (!selectedId) return '0';
     const idx = Number(selectedId) - 1;
-    return formatBn(allocatedMemo[idx] || 0);
-  }, [selectedId, allocatedMemo]);
+    return formatBn(userStrategyAllocations[idx] || 0);
+  }, [selectedId, userStrategyAllocations]);
 
   // Formatted values with max 4 decimals for display
   const userSharesFormatted = useMemo(() => formatWithMaxDecimals(userSharesStr, 4), [userSharesStr]);
@@ -301,10 +306,10 @@ const Strategies = () => {
                 </tr>
               )}
               {strategies.map((s, idx) => {
-                const allocRaw = formatBn(allocatedMemo[idx] || 0);
+                const allocRaw = formatBn(userStrategyAllocations[idx] || 0);
                 const alloc = formatWithMaxDecimals(allocRaw, 4);
                 const allocUsd = alloc; // Assuming allocated is in asset units
-                const allocWei = toWei(allocatedMemo[idx]);
+                const allocWei = toWei(userStrategyAllocations[idx]);
                 const userSharesWei = toWei(ethers.utils.parseUnits(userShares || '0', 18));
                 const pctBps = userSharesWei.gt(0)
                   ? allocWei.mul(ethers.BigNumber.from(10000)).div(userSharesWei) // basis points vs user total shares

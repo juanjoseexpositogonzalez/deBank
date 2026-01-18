@@ -11,7 +11,7 @@ import {
 } from '../store/interactions';
 
 import { useSelector, useDispatch } from 'react-redux';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const Withdraw = () => {
     const [usdcAmount, setUsdcAmount] = useState("");
@@ -31,6 +31,8 @@ const Withdraw = () => {
     const shares = useSelector(state => state.dBank.shares);
     const balances = useSelector(state => state.tokens.balances);
     const dBank = useSelector(state => state.dBank.contract);
+    const userTotalAllocated = useSelector(state => state.strategyRouter.userTotalAllocated);
+    const strategyRouter = useSelector(state => state.strategyRouter.contract);
 
     const dispatch = useDispatch();
 
@@ -58,6 +60,30 @@ const Withdraw = () => {
         return num.toFixed(maxDecimals).replace(/\.?0+$/, '');
     };
 
+    // Calculate available shares for withdrawal (excluding allocated shares)
+    const [availableShares, setAvailableShares] = useState(shares || "0");
+    
+    useEffect(() => {
+        const calculateAvailableShares = async () => {
+            if (!shares || !dBank || !strategyRouter || !userTotalAllocated || parseFloat(userTotalAllocated) === 0) {
+                setAvailableShares(shares || "0");
+                return;
+            }
+            try {
+                const sharesBN = ethers.utils.parseUnits(shares || "0", 18);
+                const userTotalAllocatedBN = ethers.utils.parseUnits(userTotalAllocated, 18);
+                // Convert allocated capital to shares
+                const allocatedSharesBN = await dBank.convertToShares(userTotalAllocatedBN);
+                const availableSharesBN = sharesBN.sub(allocatedSharesBN);
+                setAvailableShares(availableSharesBN.gt(0) ? ethers.utils.formatUnits(availableSharesBN, 18) : "0");
+            } catch (error) {
+                console.error("Error calculating available shares:", error);
+                setAvailableShares(shares || "0");
+            }
+        };
+        calculateAvailableShares();
+    }, [shares, dBank, strategyRouter, userTotalAllocated]);
+
     const withdrawHandler = async (e) => {
         e.preventDefault();
 
@@ -65,6 +91,24 @@ const Withdraw = () => {
         if (!usdcAmount || parseFloat(usdcAmount) <= 0) {
             alert("Please enter a valid amount");
             return;
+        }
+
+        // Check if user has allocated shares
+        if (userTotalAllocated && parseFloat(userTotalAllocated) > 0 && dBank && strategyRouter) {
+            try {
+                const userTotalAllocatedBN = ethers.utils.parseUnits(userTotalAllocated, 18);
+                const allocatedSharesBN = await dBank.convertToShares(userTotalAllocatedBN);
+                const sharesToWithdrawBN = ethers.utils.parseUnits(sharesAmount || "0", 18);
+                const currentSharesBN = ethers.utils.parseUnits(shares || "0", 18);
+                const availableSharesBN = currentSharesBN.sub(allocatedSharesBN);
+                
+                if (sharesToWithdrawBN.gt(availableSharesBN)) {
+                    alert(`Cannot withdraw. You have ${ethers.utils.formatUnits(allocatedSharesBN, 18)} shares allocated to strategies. Please un-allocate first.`);
+                    return;
+                }
+            } catch (error) {
+                console.error("Error validating withdrawal:", error);
+            }
         }
 
         setShowAlert(false);
@@ -112,32 +156,32 @@ const Withdraw = () => {
         }
     }
 
-    // Max on asset input should withdraw max assets backed by user's shares
+    // Max on asset input should withdraw max assets backed by user's available shares
     const maxHandlerBalance = async () => {
-        const currentShares = shares;
-        if (!currentShares || parseFloat(currentShares) <= 0) return;
+        const currentAvailableShares = availableShares;
+        if (!currentAvailableShares || parseFloat(currentAvailableShares) <= 0) return;
 
         try {
-            const sharesInWei = ethers.utils.parseUnits(currentShares, 18);
+            const sharesInWei = ethers.utils.parseUnits(currentAvailableShares, 18);
             const assetsInWei = await dBank.convertToAssets(sharesInWei);
             const assetsFormatted = ethers.utils.formatUnits(assetsInWei, 18);
-            setSharesAmount(currentShares);
+            setSharesAmount(currentAvailableShares);
             setUsdcAmount(assetsFormatted);
         } catch (error) {
             console.error("Max conversion error:", error);
         }
     }
 
-    // Max on shares input uses full share balance
+    // Max on shares input uses available share balance
     const maxHandlerShares = async () => {
-        const currentShares = shares;
-        if (!currentShares || parseFloat(currentShares) <= 0) return;
+        const currentAvailableShares = availableShares;
+        if (!currentAvailableShares || parseFloat(currentAvailableShares) <= 0) return;
 
         try {
-            const sharesInWei = ethers.utils.parseUnits(currentShares, 18);
+            const sharesInWei = ethers.utils.parseUnits(currentAvailableShares, 18);
             const assetsInWei = await dBank.convertToAssets(sharesInWei);
             const assetsFormatted = ethers.utils.formatUnits(assetsInWei, 18);
-            setSharesAmount(currentShares);
+            setSharesAmount(currentAvailableShares);
             setUsdcAmount(assetsFormatted);
         } catch (error) {
             console.error("Max shares conversion error:", error);

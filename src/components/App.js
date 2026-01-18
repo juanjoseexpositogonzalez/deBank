@@ -21,6 +21,7 @@ import {
   loadMockS1,
   loadConfigManager,
   loadBalances,
+  loadUserStrategyAllocations,
 } from '../store/interactions'
 import { setAccount } from '../store/reducers/provider'
 
@@ -56,7 +57,7 @@ function App() {
 
         const nextTokens = await loadTokens(nextProvider, nextChainId, dispatch);
         const nextDBank = await loadBank(nextProvider, nextChainId, dispatch);
-        await loadStrategyRouter(nextProvider, nextChainId, dispatch);
+        const strategyRouterContract = await loadStrategyRouter(nextProvider, nextChainId, dispatch);
         await loadMockS1(nextProvider, nextChainId, dispatch);
         await loadConfigManager(nextProvider, nextChainId, dispatch);
 
@@ -64,6 +65,10 @@ function App() {
         if (accounts && accounts.length > 0 && nextDBank && nextTokens && nextTokens.length > 0) {
           const currentAccount = ethers.utils.getAddress(accounts[0]);
           await loadBalances(nextDBank, nextTokens, currentAccount, dispatch);
+          // Load user allocations
+          if (strategyRouterContract) {
+            await loadUserStrategyAllocations(strategyRouterContract, currentAccount, dispatch);
+          }
         }
       } catch (error) {
         console.error('Error handling chain change:', error);
@@ -86,10 +91,15 @@ function App() {
           // Load fresh contract instances
           const freshTokens = await loadTokens(freshProvider, chainId, dispatch);
           const freshDBank = await loadBank(freshProvider, chainId, dispatch);
+          const strategyRouterContract = await loadStrategyRouter(freshProvider, chainId, dispatch);
 
           // Now load balances with fresh contracts
           if (freshDBank && freshTokens && freshTokens.length > 0) {
             await loadBalances(freshDBank, freshTokens, newAccount, dispatch);
+            // Load user allocations
+            if (strategyRouterContract) {
+              await loadUserStrategyAllocations(strategyRouterContract, newAccount, dispatch);
+            }
           }
         } catch (error) {
           console.error('Error loading balances after account change:', error);
@@ -121,13 +131,17 @@ function App() {
         // Initialize contracts
         const tokensContracts = await loadTokens(provider, chainId, dispatch);
         const dBankContract = await loadBank(provider, chainId, dispatch);
-        await loadStrategyRouter(provider, chainId, dispatch);
+        const strategyRouterContract = await loadStrategyRouter(provider, chainId, dispatch);
         await loadMockS1(provider, chainId, dispatch);
         await loadConfigManager(provider, chainId, dispatch);
 
         // Load balances/shares if account already connected
         if (currentAccount && tokensContracts && tokensContracts.length > 0 && dBankContract) {
           await loadBalances(dBankContract, tokensContracts, currentAccount, dispatch);
+          // Load user allocations
+          if (strategyRouterContract) {
+            await loadUserStrategyAllocations(strategyRouterContract, currentAccount, dispatch);
+          }
         }
       } catch (error) {
         console.error('Error loading blockchain data:', error);
