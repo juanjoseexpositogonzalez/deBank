@@ -28,9 +28,10 @@
         "test": "react-scripts test",
         "eject": "react-scripts eject",
         "advance-time": "hardhat run scripts/advanceTime.js --network localhost",
-        "advance-time:1day": "hardhat run scripts/advanceTime.js --network localhost -- --days 1",
-        "advance-time:7days": "hardhat run scripts/advanceTime.js --network localhost -- --days 7",
-        "advance-time:30days": "hardhat run scripts/advanceTime.js --network localhost -- --days 30"
+        "advance-time:1day": "ADVANCE_DAYS=1 hardhat run scripts/advanceTime.js --network localhost",
+        "advance-time:7days": "ADVANCE_DAYS=7 hardhat run scripts/advanceTime.js --network localhost",
+        "advance-time:30days": "ADVANCE_DAYS=30 hardhat run scripts/advanceTime.js --network localhost",
+        "advance-time:1year": "ADVANCE_DAYS=365 hardhat run scripts/advanceTime.js --network localhost"
     },
     "author": "expositogonzalez.juanjose@gmail.com",
     "license": "ISC",

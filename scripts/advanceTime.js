@@ -11,11 +11,24 @@ const { ethers } = require("hardhat");
  *   npx hardhat run scripts/advanceTime.js --network localhost -- --seconds 3600
  */
 async function main() {
-    const args = process.argv.slice(2);
-    
-    // Parse arguments
+    // Parse environment variables first (for npm scripts)
     let secondsToAdvance = 0;
     
+    if (process.env.ADVANCE_DAYS) {
+        secondsToAdvance += parseInt(process.env.ADVANCE_DAYS) * 24 * 60 * 60;
+    }
+    if (process.env.ADVANCE_HOURS) {
+        secondsToAdvance += parseInt(process.env.ADVANCE_HOURS) * 60 * 60;
+    }
+    if (process.env.ADVANCE_MINUTES) {
+        secondsToAdvance += parseInt(process.env.ADVANCE_MINUTES) * 60;
+    }
+    if (process.env.ADVANCE_SECONDS) {
+        secondsToAdvance += parseInt(process.env.ADVANCE_SECONDS);
+    }
+    
+    // Parse command line arguments (for direct usage)
+    const args = process.argv.slice(2);
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--days' && args[i + 1]) {
             secondsToAdvance += parseInt(args[i + 1]) * 24 * 60 * 60;
