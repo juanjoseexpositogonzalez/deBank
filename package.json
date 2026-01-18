@@ -26,7 +26,11 @@
         "start": "react-scripts start",
         "build": "react-scripts build",
         "test": "react-scripts test",
-        "eject": "react-scripts eject"
+        "eject": "react-scripts eject",
+        "advance-time": "hardhat run scripts/advanceTime.js --network localhost",
+        "advance-time:1day": "hardhat run scripts/advanceTime.js --network localhost -- --days 1",
+        "advance-time:7days": "hardhat run scripts/advanceTime.js --network localhost -- --days 7",
+        "advance-time:30days": "hardhat run scripts/advanceTime.js --network localhost -- --days 30"
     },
     "author": "expositogonzalez.juanjose@gmail.com",
     "license": "ISC",

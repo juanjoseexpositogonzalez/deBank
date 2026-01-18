@@ -74,13 +74,30 @@ import {
     setConfigManagerAllowedVenues,
 } from './reducers/configManager';
 
-import TOKEN_ABI from '../abis/Token.json'
-import DBANK_ABI from '../abis/dBank.json'
-import STRATEGY_ROUTER_ABI from '../abis/StrategyRouter.json'
-import CONFIG_MANAGER_ABI from '../abis/ConfigManager.json'
-import MOCK_S1_ABI from '../abis/MockS1.json'
+import TOKEN_ABI_RAW from '../abis/Token.json'
+import DBANK_ABI_RAW from '../abis/dBank.json'
+import STRATEGY_ROUTER_ABI_RAW from '../abis/StrategyRouter.json'
+import CONFIG_MANAGER_ABI_RAW from '../abis/ConfigManager.json'
+import MOCK_S1_ABI_RAW from '../abis/MockS1.json'
 
 import config from '../config.json'
+
+// Normalize ABIs - handle both formats: direct array or Hardhat artifact with .abi property
+const normalizeABI = (abi) => {
+    if (Array.isArray(abi)) {
+        return abi;
+    }
+    if (abi && abi.abi && Array.isArray(abi.abi)) {
+        return abi.abi;
+    }
+    throw new Error('Invalid ABI format');
+};
+
+const TOKEN_ABI = normalizeABI(TOKEN_ABI_RAW);
+const DBANK_ABI = normalizeABI(DBANK_ABI_RAW);
+const STRATEGY_ROUTER_ABI = normalizeABI(STRATEGY_ROUTER_ABI_RAW);
+const CONFIG_MANAGER_ABI = normalizeABI(CONFIG_MANAGER_ABI_RAW);
+const MOCK_S1_ABI = normalizeABI(MOCK_S1_ABI_RAW);
 
 
 export const loadProvider = (dispatch) => {
@@ -526,7 +543,7 @@ export const unallocateFromStrategy = async (provider, strategyRouter, tokens, a
 // LOAD STRATEGY RETURNS
 export const loadStrategyReturns = async (provider, strategyRouter, dispatch) => {
     try {
-        const returns = await strategyRouter.getStrategyReturns();
+        await strategyRouter.getStrategyReturns();
         // dispatch(setStrategyReturns(returns));
     } catch (error) {
         console.error("loadStrategyReturns error:", error);

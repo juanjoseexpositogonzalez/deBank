@@ -4,7 +4,7 @@ import { Card, Form, Button, InputGroup, Row, Spinner, Table } from 'react-boots
 import { ethers } from 'ethers';
 
 import Alert from './Alert';
-import { allocateToStrategy, unallocateFromStrategy } from '../store/interactions';
+import { allocateToStrategy, unallocateFromStrategy, loadUserStrategyAllocations } from '../store/interactions';
 
 const formatBn = (bn) => {
   try {
@@ -63,8 +63,8 @@ const Strategies = () => {
   const strategyPaused = useSelector(state => state.strategyRouter.strategyPaused) || [];
   const strategyActive = useSelector(state => state.strategyRouter.strategyActive) || [];
   const symbols = useSelector(state => state.tokens.symbols) || [];
-  const userStrategyAllocations = useSelector(state => state.strategyRouter.userStrategyAllocations) || [];
-  const userTotalAllocated = useSelector(state => state.strategyRouter.userTotalAllocated) || "0";
+  const userStrategyAllocationsRaw = useSelector(state => state.strategyRouter.userStrategyAllocations);
+  const userStrategyAllocations = useMemo(() => userStrategyAllocationsRaw || [], [userStrategyAllocationsRaw]);
 
   const [selectedId, setSelectedId] = useState('');
   const [amount, setAmount] = useState('');
@@ -121,7 +121,9 @@ const Strategies = () => {
     // Max withdraw = user's allocated amount for that strategy
     if (!selectedId) return '0';
     const idx = Number(selectedId) - 1;
-    return formatBn(userStrategyAllocations[idx] || 0);
+    // userStrategyAllocations[idx] is already a formatted string
+    const allocStr = userStrategyAllocations[idx] || "0";
+    return allocStr;
   }, [selectedId, userStrategyAllocations]);
 
   // Formatted values with max 4 decimals for display
@@ -142,16 +144,48 @@ const Strategies = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!provider || !strategyRouter || !tokens || tokens.length === 0 || !selectedId) return;
-    if (!amount || parseFloat(amount) <= 0) return;
+    if (!amount || parseFloat(amount) <= 0) {
+      alert("Please enter a valid amount");
+      return;
+    }
+
+    // Validation for un-allocate: check against max unallocate
+    if (mode === 'unallocate') {
+      const maxUnallocFloat = parseFloat(maxUnallocate || '0');
+      if (parseFloat(amount) > maxUnallocFloat) {
+        alert(`Cannot un-allocate more than ${maxUnallocateFormatted} shares. You have ${maxUnallocateFormatted} allocated in this strategy.`);
+        return;
+      }
+    }
 
     // Pre-checks against max allowed
     const maxAllowedFloat = parseFloat(maxAlloc || '0');
     if (mode === 'allocate' && parseFloat(amount) > maxAllowedFloat) {
-      setShowAlert(true);
-      setIsAllocating(false);
-      setIsSuccess(false);
-      setTxHash(null);
+      const totalAllocated = userStrategyAllocations.reduce((sum, v) => sum + parseFloat(v || '0'), 0);
+      const unallocated = parseFloat(userSharesStr || '0') - totalAllocated;
+      alert(`Cannot allocate more than ${maxAllowedFloat} shares. You have ${userSharesFormatted} total shares, with ${formatWithMaxDecimals(unallocated.toString(), 4)} unallocated.`);
       return;
+    }
+
+    // Additional validation: Check that user has enough unallocated shares before allocating
+    if (mode === 'allocate') {
+      try {
+        const amountInWei = ethers.utils.parseUnits(amount, 18);
+        const userSharesBN = ethers.utils.parseUnits(userSharesStr || '0', 18);
+        const userAllocatedSumBN = userStrategyAllocations.reduce((acc, v) => {
+          return acc.add(toWei(v));
+        }, ethers.BigNumber.from(0));
+        const unallocatedSharesBN = userSharesBN.gt(userAllocatedSumBN) ? userSharesBN.sub(userAllocatedSumBN) : ethers.BigNumber.from(0);
+        
+        if (amountInWei.gt(unallocatedSharesBN)) {
+          alert(`Cannot allocate ${amount} shares. You only have ${ethers.utils.formatUnits(unallocatedSharesBN, 18)} unallocated shares available.`);
+          return;
+        }
+      } catch (error) {
+        console.error("Error validating allocation:", error);
+        alert("Error validating allocation. Please try again.");
+        return;
+      }
     }
 
     setShowAlert(false);
@@ -161,14 +195,20 @@ const Strategies = () => {
 
     let ok = false;
     let hash = null;
-    if (mode === 'allocate') {
-      const res = await allocateToStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch);
-      ok = res.ok;
-      hash = res.hash || null;
-    } else {
-      const res = await unallocateFromStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch, 50);
-      ok = res.ok;
-      hash = res.hash || null;
+    try {
+      if (mode === 'allocate') {
+        const res = await allocateToStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch);
+        ok = res.ok;
+        hash = res.hash || null;
+      } else {
+        const res = await unallocateFromStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch, 50);
+        ok = res.ok;
+        hash = res.hash || null;
+      }
+    } catch (error) {
+      console.error("Error in handleSubmit:", error);
+      ok = false;
+      hash = null;
     }
 
     setIsAllocating(false);
@@ -192,6 +232,20 @@ const Strategies = () => {
       setSelectedId(String(filteredStrategies[0].id));
     }
   }, [filteredStrategies, selectedId]);
+
+  // Load user allocations when component mounts or when account/strategyRouter changes
+  useEffect(() => {
+    const loadAllocations = async () => {
+      if (strategyRouter && account) {
+        try {
+          await loadUserStrategyAllocations(strategyRouter, account, dispatch);
+        } catch (error) {
+          console.error("Error loading user allocations in Strategies component:", error);
+        }
+      }
+    };
+    loadAllocations();
+  }, [strategyRouter, account, dispatch]);
 
   return (
        <div>
@@ -306,11 +360,12 @@ const Strategies = () => {
                 </tr>
               )}
               {strategies.map((s, idx) => {
-                const allocRaw = formatBn(userStrategyAllocations[idx] || 0);
+                // userStrategyAllocations[idx] is already a formatted string from loadUserStrategyAllocations
+                const allocRaw = userStrategyAllocations[idx] || "0";
                 const alloc = formatWithMaxDecimals(allocRaw, 4);
                 const allocUsd = alloc; // Assuming allocated is in asset units
-                const allocWei = toWei(userStrategyAllocations[idx]);
-                const userSharesWei = toWei(ethers.utils.parseUnits(userShares || '0', 18));
+                const allocWei = ethers.utils.parseUnits(allocRaw || '0', 18);
+                const userSharesWei = ethers.utils.parseUnits(userSharesStr || '0', 18);
                 const pctBps = userSharesWei.gt(0)
                   ? allocWei.mul(ethers.BigNumber.from(10000)).div(userSharesWei) // basis points vs user total shares
                   : ethers.BigNumber.from(0);

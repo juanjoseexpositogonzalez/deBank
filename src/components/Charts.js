@@ -1,7 +1,7 @@
 import { useSelector, useDispatch } from 'react-redux';
 import { ethers } from 'ethers';
 import { useEffect, useState, useMemo } from 'react';
-import { Card, Row, Col } from 'react-bootstrap';
+import { Card, Row, Col, OverlayTrigger, Popover, Button } from 'react-bootstrap';
 import Chart from 'react-apexcharts';
 import Loading from './Loading';
 
@@ -9,7 +9,20 @@ import {
     loadStrategyRouter,
 } from '../store/interactions';
 
-import MOCK_S1_ABI from '../abis/MockS1.json';
+import MOCK_S1_ABI_RAW from '../abis/MockS1.json';
+
+// Normalize ABI - handle both formats: direct array or Hardhat artifact with .abi property
+const normalizeABI = (abi) => {
+    if (Array.isArray(abi)) {
+        return abi;
+    }
+    if (abi && abi.abi && Array.isArray(abi.abi)) {
+        return abi.abi;
+    }
+    throw new Error('Invalid ABI format');
+};
+
+const MOCK_S1_ABI = normalizeABI(MOCK_S1_ABI_RAW);
 
 const Charts = () => {
     const chainId = useSelector(state => state.provider.chainId);
@@ -17,14 +30,21 @@ const Charts = () => {
     const account = useSelector(state => state.provider.account);
     
     const strategyRouter = useSelector(state => state.strategyRouter.contract);
-    const strategies = useSelector(state => state.strategyRouter.strategies) || [];
-    const strategyAllocated = useSelector(state => state.strategyRouter.strategyAllocated) || [];
-    const strategyCap = useSelector(state => state.strategyRouter.strategyCap) || [];
-    const strategyActive = useSelector(state => state.strategyRouter.strategyActive) || [];
+    const strategiesRaw = useSelector(state => state.strategyRouter.strategies);
+    const strategyAllocatedRaw = useSelector(state => state.strategyRouter.strategyAllocated);
+    const strategyCapRaw = useSelector(state => state.strategyRouter.strategyCap);
+    const strategyActiveRaw = useSelector(state => state.strategyRouter.strategyActive);
     const symbols = useSelector(state => state.tokens.symbols) || [];
     
     const dBank = useSelector(state => state.dBank.contract);
-    const userStrategyAllocations = useSelector(state => state.strategyRouter.userStrategyAllocations) || [];
+    const userStrategyAllocationsRaw = useSelector(state => state.strategyRouter.userStrategyAllocations);
+
+    // Wrap in useMemo to prevent unnecessary re-renders
+    const strategies = useMemo(() => strategiesRaw || [], [strategiesRaw]);
+    const strategyAllocated = useMemo(() => strategyAllocatedRaw || [], [strategyAllocatedRaw]);
+    const strategyCap = useMemo(() => strategyCapRaw || [], [strategyCapRaw]);
+    const strategyActive = useMemo(() => strategyActiveRaw || [], [strategyActiveRaw]);
+    const userStrategyAllocations = useMemo(() => userStrategyAllocationsRaw || [], [userStrategyAllocationsRaw]);
 
     const dispatch = useDispatch();
 
@@ -128,7 +148,7 @@ const Charts = () => {
         // Refresh data every 30 seconds
         const interval = setInterval(loadChartData, 30000);
         return () => clearInterval(interval);
-    }, [strategyRouter, dBank, provider, chainId, dispatch, strategies.length]);
+    }, [strategyRouter, dBank, provider, chainId, dispatch, strategies]);
 
     // Helper functions for localStorage
     const getHistoricalData = (key) => {
@@ -377,7 +397,45 @@ const Charts = () => {
                 <Col md={6} className="mb-4">
                     <Card style={{ backgroundColor: '#1a1d29', borderColor: 'rgba(255, 255, 255, 0.1)' }}>
                         <Card.Body>
-                            <h5 style={{ color: '#f8f9fa', marginBottom: '20px' }}>Allocation Distribution</h5>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                                <h5 style={{ color: '#f8f9fa', margin: 0 }}>Allocation Distribution</h5>
+                                <OverlayTrigger
+                                    trigger="click"
+                                    placement="left"
+                                    overlay={
+                                        <Popover id="allocation-distribution-info" style={{ backgroundColor: '#2d3142', borderColor: 'rgba(255, 255, 255, 0.2)' }}>
+                                            <Popover.Header as="h6" style={{ backgroundColor: '#1a1d29', color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)' }}>
+                                                Allocation Distribution
+                                            </Popover.Header>
+                                            <Popover.Body style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
+                                                Esta gráfica muestra la distribución porcentual del capital total alocado entre las diferentes estrategias activas del vault.
+                                                <br /><br />
+                                                <strong>Nota:</strong> Los valores representan el capital total alocado por todos los usuarios, no solo tus allocations personales.
+                                            </Popover.Body>
+                                        </Popover>
+                                    }
+                                >
+                                    <Button
+                                        variant="link"
+                                        style={{
+                                            color: '#0dcaf0',
+                                            padding: '0',
+                                            minWidth: '24px',
+                                            height: '24px',
+                                            fontSize: '16px',
+                                            textDecoration: 'none',
+                                            border: '1px solid #0dcaf0',
+                                            borderRadius: '50%',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            lineHeight: '1'
+                                        }}
+                                    >
+                                        ?
+                                    </Button>
+                                </OverlayTrigger>
+                            </div>
                             {allocationDistributionData.series.length > 0 ? (
                                 <Chart
                                     options={{
@@ -582,7 +640,45 @@ const Charts = () => {
                     <Col md={6} className="mb-4">
                         <Card style={{ backgroundColor: '#1a1d29', borderColor: 'rgba(255, 255, 255, 0.1)' }}>
                             <Card.Body>
-                                <h5 style={{ color: '#f8f9fa', marginBottom: '20px' }}>Your Allocation Distribution</h5>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                                    <h5 style={{ color: '#f8f9fa', margin: 0 }}>Your Allocation Distribution</h5>
+                                    <OverlayTrigger
+                                        trigger="click"
+                                        placement="left"
+                                        overlay={
+                                            <Popover id="user-allocation-distribution-info" style={{ backgroundColor: '#2d3142', borderColor: 'rgba(255, 255, 255, 0.2)' }}>
+                                                <Popover.Header as="h6" style={{ backgroundColor: '#1a1d29', color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)' }}>
+                                                    Your Allocation Distribution
+                                                </Popover.Header>
+                                                <Popover.Body style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
+                                                    Esta gráfica muestra la distribución porcentual de <strong>tus allocations personales</strong> entre las diferentes estrategias.
+                                                    <br /><br />
+                                                    <strong>Importante:</strong> Solo puedes retirar shares que no estén alocadas en estrategias. Si tienes shares alocadas, deberás des-alocarlas primero antes de poder retirar.
+                                                </Popover.Body>
+                                            </Popover>
+                                        }
+                                    >
+                                        <Button
+                                            variant="link"
+                                            style={{
+                                                color: '#0dcaf0',
+                                                padding: '0',
+                                                minWidth: '24px',
+                                                height: '24px',
+                                                fontSize: '16px',
+                                                textDecoration: 'none',
+                                                border: '1px solid #0dcaf0',
+                                                borderRadius: '50%',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                lineHeight: '1'
+                                            }}
+                                        >
+                                            ?
+                                        </Button>
+                                    </OverlayTrigger>
+                                </div>
                                 <Chart
                                     options={{
                                         chart: { type: 'pie' },
