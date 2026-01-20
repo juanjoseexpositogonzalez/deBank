@@ -128,6 +128,16 @@ const Charts = () => {
                                 const userSharesBN = await dBank.balanceOf(account, { blockTag });
                                 const userShares = parseFloat(ethers.utils.formatUnits(userSharesBN, 18));
                                 userSharesValue = userShares * pricePerShare;
+                                
+                                // Debug log for first few events to verify calculations
+                                if (eventData.blockNumber <= 10) {
+                                    console.log(`[Charts] Block ${eventData.blockNumber}:`, {
+                                        userShares: userShares.toFixed(4),
+                                        pricePerShare: pricePerShare.toFixed(6),
+                                        userSharesValue: userSharesValue.toFixed(2),
+                                        eventType: eventData.type
+                                    });
+                                }
                             } catch (error) {
                                 // User might not have shares at this block
                                 userSharesValue = 0;
