@@ -112,7 +112,6 @@ const Withdraw = () => {
 
             // Get user's total allocated capital from StrategyRouter
             const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
-            const userTotalAllocatedValue = parseFloat(ethers.utils.formatUnits(userTotalAllocatedBN, 18));
             
             // Calculate shares that will be withdrawn (based on usdcAmount, which is what we send to contract)
             const assetsToWithdrawBN = ethers.utils.parseUnits(usdcAmount, 18);
