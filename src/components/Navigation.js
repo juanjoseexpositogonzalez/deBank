@@ -20,9 +20,14 @@ const Navigation = () => {
   const dispatch = useDispatch();  
 
   const connectHandler = async () => {
-    const account = await loadAccount(dispatch);
-    if (account && tokens.length > 0 && dBank) {
-      await loadBalances(dBank, tokens, account, dispatch);
+    try {
+      const account = await loadAccount(dispatch);
+      if (account && tokens.length > 0 && dBank) {
+        await loadBalances(dBank, tokens, account, dispatch);
+      }
+    } catch (error) {
+      console.error('Error connecting wallet:', error);
+      alert(error.message || 'Failed to connect wallet. Please make sure MetaMask is installed and unlocked.');
     }
   }
 

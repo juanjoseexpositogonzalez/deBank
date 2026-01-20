@@ -115,8 +115,18 @@ export const loadNetwork = async (provider, dispatch) => {
     return chainId
 }
 
-export const loadAccount = async (dispatch) => {    
+export const loadAccount = async (dispatch) => {
+    // Check if MetaMask or other wallet is installed
+    if (!window.ethereum) {
+        throw new Error('MetaMask or other Ethereum wallet is not installed. Please install MetaMask to connect.');
+    }
+    
     const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' })
+    
+    if (!accounts || accounts.length === 0) {
+        throw new Error('No accounts found. Please unlock your wallet.');
+    }
+    
     const account = ethers.utils.getAddress(accounts[0])
     dispatch(setAccount(account))
 

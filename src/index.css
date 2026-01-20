@@ -150,4 +150,41 @@ code {
   bottom: 100px;
   right: 100px;
   padding: 50px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+}
+
+/* Override Bootstrap success alert styles for a more subtle, professional look */
+.alert-success {
+  background-color: #1a3d2e !important;
+  border-color: #28a745 !important;
+  color: #d4edda !important;
+}
+
+.alert-success .alert-heading {
+  color: #6cff8f !important;
+  font-weight: 500;
+}
+
+.alert-success hr {
+  border-color: rgba(108, 255, 143, 0.2) !important;
+}
+
+.alert-success a {
+  color: #6cff8f !important;
+  text-decoration: none;
+}
+
+.alert-success a:hover {
+  color: #8fffaa !important;
+  text-decoration: underline;
+}
+
+.alert-success .btn-close {
+  filter: invert(1) grayscale(100%) brightness(200%);
+  opacity: 0.7;
+}
+
+.alert-success .btn-close:hover {
+  opacity: 1;
 }

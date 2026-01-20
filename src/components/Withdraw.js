@@ -93,22 +93,61 @@ const Withdraw = () => {
             return;
         }
 
-        // Check if user has allocated shares
-        if (userTotalAllocated && parseFloat(userTotalAllocated) > 0 && dBank && strategyRouter) {
-            try {
-                const userTotalAllocatedBN = ethers.utils.parseUnits(userTotalAllocated, 18);
+        // CRITICAL: Always validate allocated shares before withdrawal
+        // Get fresh data from contracts to ensure accuracy
+        if (!dBank || !strategyRouter || !account) {
+            alert("Error: Contracts not loaded. Please refresh the page.");
+            return;
+        }
+
+        try {
+            // Get current user shares from contract
+            const currentSharesBN = await dBank.balanceOf(account);
+            const currentShares = parseFloat(ethers.utils.formatUnits(currentSharesBN, 18));
+            
+            if (currentShares <= 0) {
+                alert("You don't have any shares to withdraw.");
+                return;
+            }
+
+            // Get user's total allocated capital from StrategyRouter
+            const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
+            const userTotalAllocatedValue = parseFloat(ethers.utils.formatUnits(userTotalAllocatedBN, 18));
+            
+            // Calculate shares that will be withdrawn (based on usdcAmount, which is what we send to contract)
+            const assetsToWithdrawBN = ethers.utils.parseUnits(usdcAmount, 18);
+            const sharesToWithdrawBN = await dBank.convertToShares(assetsToWithdrawBN);
+            
+            // If user has allocated capital, convert it to shares equivalent
+            if (userTotalAllocatedBN.gt(0)) {
                 const allocatedSharesBN = await dBank.convertToShares(userTotalAllocatedBN);
-                const sharesToWithdrawBN = ethers.utils.parseUnits(sharesAmount || "0", 18);
-                const currentSharesBN = ethers.utils.parseUnits(shares || "0", 18);
-                const availableSharesBN = currentSharesBN.sub(allocatedSharesBN);
+                const allocatedShares = parseFloat(ethers.utils.formatUnits(allocatedSharesBN, 18));
                 
+                // Calculate available (unallocated) shares
+                const availableSharesBN = currentSharesBN.sub(allocatedSharesBN);
+                const availableShares = parseFloat(ethers.utils.formatUnits(availableSharesBN, 18));
+                
+                // Check if trying to withdraw more than available shares
                 if (sharesToWithdrawBN.gt(availableSharesBN)) {
-                    alert(`Cannot withdraw. You have ${ethers.utils.formatUnits(allocatedSharesBN, 18)} shares allocated to strategies. Please un-allocate first.`);
+                    alert(
+                        `Cannot withdraw. You have ${allocatedShares.toFixed(4)} shares allocated to strategies ` +
+                        `(out of ${currentShares.toFixed(4)} total shares). ` +
+                        `You can only withdraw up to ${availableShares.toFixed(4)} shares. ` +
+                        `Please un-allocate some shares first.`
+                    );
                     return;
                 }
-            } catch (error) {
-                console.error("Error validating withdrawal:", error);
+            } else {
+                // Even if no allocated capital, verify we're not withdrawing more than total shares
+                if (sharesToWithdrawBN.gt(currentSharesBN)) {
+                    alert(`Cannot withdraw. You only have ${currentShares.toFixed(4)} shares.`);
+                    return;
+                }
             }
+        } catch (error) {
+            console.error("Error validating withdrawal:", error);
+            alert(`Error validating withdrawal: ${error.message || 'Unknown error'}. Please try again.`);
+            return; // CRITICAL: Stop execution if validation fails
         }
 
         setShowAlert(false);
@@ -158,33 +197,69 @@ const Withdraw = () => {
 
     // Max on asset input should withdraw max assets backed by user's available shares
     const maxHandlerBalance = async () => {
-        const currentAvailableShares = availableShares;
-        if (!currentAvailableShares || parseFloat(currentAvailableShares) <= 0) return;
+        if (!dBank || !strategyRouter || !account) return;
 
         try {
-            const sharesInWei = ethers.utils.parseUnits(currentAvailableShares, 18);
-            const assetsInWei = await dBank.convertToAssets(sharesInWei);
+            // Get fresh data from contracts
+            const currentSharesBN = await dBank.balanceOf(account);
+            const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
+            
+            let availableSharesBN = currentSharesBN;
+            
+            // If user has allocated capital, calculate available shares
+            if (userTotalAllocatedBN.gt(0)) {
+                const allocatedSharesBN = await dBank.convertToShares(userTotalAllocatedBN);
+                availableSharesBN = currentSharesBN.sub(allocatedSharesBN);
+            }
+            
+            if (availableSharesBN.lte(0)) {
+                alert("You don't have any unallocated shares to withdraw. Please un-allocate some shares first.");
+                return;
+            }
+            
+            const availableShares = ethers.utils.formatUnits(availableSharesBN, 18);
+            const assetsInWei = await dBank.convertToAssets(availableSharesBN);
             const assetsFormatted = ethers.utils.formatUnits(assetsInWei, 18);
-            setSharesAmount(currentAvailableShares);
+            
+            setSharesAmount(availableShares);
             setUsdcAmount(assetsFormatted);
         } catch (error) {
             console.error("Max conversion error:", error);
+            alert(`Error calculating max withdrawal: ${error.message || 'Unknown error'}`);
         }
     }
 
     // Max on shares input uses available share balance
     const maxHandlerShares = async () => {
-        const currentAvailableShares = availableShares;
-        if (!currentAvailableShares || parseFloat(currentAvailableShares) <= 0) return;
+        if (!dBank || !strategyRouter || !account) return;
 
         try {
-            const sharesInWei = ethers.utils.parseUnits(currentAvailableShares, 18);
-            const assetsInWei = await dBank.convertToAssets(sharesInWei);
+            // Get fresh data from contracts
+            const currentSharesBN = await dBank.balanceOf(account);
+            const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
+            
+            let availableSharesBN = currentSharesBN;
+            
+            // If user has allocated capital, calculate available shares
+            if (userTotalAllocatedBN.gt(0)) {
+                const allocatedSharesBN = await dBank.convertToShares(userTotalAllocatedBN);
+                availableSharesBN = currentSharesBN.sub(allocatedSharesBN);
+            }
+            
+            if (availableSharesBN.lte(0)) {
+                alert("You don't have any unallocated shares to withdraw. Please un-allocate some shares first.");
+                return;
+            }
+            
+            const availableShares = ethers.utils.formatUnits(availableSharesBN, 18);
+            const assetsInWei = await dBank.convertToAssets(availableSharesBN);
             const assetsFormatted = ethers.utils.formatUnits(assetsInWei, 18);
-            setSharesAmount(currentAvailableShares);
+            
+            setSharesAmount(availableShares);
             setUsdcAmount(assetsFormatted);
         } catch (error) {
             console.error("Max shares conversion error:", error);
+            alert(`Error calculating max withdrawal: ${error.message || 'Unknown error'}`);
         }
     }
 
@@ -231,7 +306,12 @@ const Withdraw = () => {
                     <Row className='my-3'>                        
                         <Form.Text className='text-end my-2' style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
                             Shares: {formatWithMaxDecimals(shares)}
-                            {shares && parseFloat(shares) > 0 && (
+                            {availableShares && parseFloat(availableShares) > 0 && parseFloat(availableShares) < parseFloat(shares || "0") && (
+                                <span style={{ color: '#ffc107', marginLeft: '8px' }}>
+                                    (Available: {formatWithMaxDecimals(availableShares)})
+                                </span>
+                            )}
+                            {availableShares && parseFloat(availableShares) > 0 && (
                                 <span
                                     onClick={maxHandlerShares}
                                     style={{
