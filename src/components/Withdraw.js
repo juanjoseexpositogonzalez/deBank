@@ -181,7 +181,8 @@ const Withdraw = () => {
         try {
             const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
             if (userTotalAllocatedBN.gt(0)) {
-                alert("No puedes retirar mientras tengas shares alocadas. Desaloca primero.");
+                alert("You cannot withdraw while you have shares allocated. Unallocate first.");
+                // alert("No puedes retirar mientras tengas shares alocadas. Desaloca primero.");
                 return;
             }
 
@@ -210,7 +211,8 @@ const Withdraw = () => {
         try {
             const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
             if (userTotalAllocatedBN.gt(0)) {
-                alert("No puedes retirar mientras tengas shares alocadas. Desaloca primero.");
+                alert("You cannot withdraw while you have shares allocated. Unallocate first.");
+                // alert("No puedes retirar mientras tengas shares alocadas. Desaloca primero.");
                 return;
             }
 
@@ -280,7 +282,7 @@ const Withdraw = () => {
                                     (Available: {formatWithMaxDecimals(availableShares)})
                                 </span>
                             )}
-                            {availableShares && parseFloat(availableShares) > 0 && (
+                            {shares && parseFloat(shares) > 0 && (
                                 <span
                                     onClick={maxHandlerShares}
                                     style={{

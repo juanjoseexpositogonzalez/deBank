@@ -4,7 +4,7 @@ import { Card, Form, Button, InputGroup, Row, Spinner, Table } from 'react-boots
 import { ethers } from 'ethers';
 
 import Alert from './Alert';
-import { allocateToStrategy, unallocateFromStrategy, loadUserStrategyAllocations } from '../store/interactions';
+import { allocateToStrategy, unallocateFromStrategy, loadUserStrategyAllocations, loadBalances } from '../store/interactions';
 
 const formatBn = (bn) => {
   try {
@@ -46,8 +46,14 @@ const Strategies = () => {
   const chainId = useSelector(state => state.provider.chainId);
   const account = useSelector(state => state.provider.account);
   const tokens = useSelector(state => state.tokens.contracts);
+  const dBank = useSelector(state => state.dBank.contract);
 
   const userShares = useSelector(state => state.dBank.shares) || "0";
+  const [userSharesOnChain, setUserSharesOnChain] = useState(null);
+  const [allocationSharesByStrategy, setAllocationSharesByStrategy] = useState([]);
+  const [pricePerShare, setPricePerShare] = useState("0");
+  const [userSharesValue, setUserSharesValue] = useState("0");
+  const [userUnallocatedValue, setUserUnallocatedValue] = useState("0");
   const userSharesStr = useMemo(() => {
     if (!userShares) return '0';
     if (Array.isArray(userShares)) return '0';
@@ -55,6 +61,7 @@ const Strategies = () => {
     const s = String(userShares);
     return s && s !== 'undefined' ? s : '0';
   }, [userShares]);
+  const displaySharesStr = useMemo(() => userSharesOnChain || userSharesStr, [userSharesOnChain, userSharesStr]);
 
   const strategyRouter = useSelector(state => state.strategyRouter.contract);
   const strategies = useSelector(state => state.strategyRouter.strategies) || [];
@@ -64,7 +71,11 @@ const Strategies = () => {
   const strategyActive = useSelector(state => state.strategyRouter.strategyActive) || [];
   const symbols = useSelector(state => state.tokens.symbols) || [];
   const userStrategyAllocationsRaw = useSelector(state => state.strategyRouter.userStrategyAllocations);
+  const userStrategyAllocationsValueRaw = useSelector(state => state.strategyRouter.userStrategyAllocationsValue);
+  const userTotalAllocated = useSelector(state => state.strategyRouter.userTotalAllocated || "0");
+  const userTotalAllocatedValue = useSelector(state => state.strategyRouter.userTotalAllocatedValue || "0");
   const userStrategyAllocations = useMemo(() => userStrategyAllocationsRaw || [], [userStrategyAllocationsRaw]);
+  const userStrategyAllocationsValue = useMemo(() => userStrategyAllocationsValueRaw || [], [userStrategyAllocationsValueRaw]);
 
   const [selectedId, setSelectedId] = useState('');
   const [amount, setAmount] = useState('');
@@ -100,37 +111,106 @@ const Strategies = () => {
     }
   }, [selectedId, capsMemo, allocatedMemo]);
 
+  const unallocatedPrincipal = useMemo(() => {
+    const totalShares = parseFloat(displaySharesStr || "0");
+    const allocatedPrincipal = parseFloat(userTotalAllocated || "0");
+    return Math.max(totalShares - allocatedPrincipal, 0);
+  }, [displaySharesStr, userTotalAllocated]);
+
   const maxAlloc = useMemo(() => {
-    // For allocate: min(unallocated user shares, remaining cap)
+    // For allocate: min(unallocated principal, remaining cap)
     try {
-      const userWei = ethers.utils.parseUnits(userSharesStr || '0', 18);
-      // Sum user's allocations across all strategies
-      const userAllocatedSumWei = userStrategyAllocations.reduce((acc, v) => {
-        return acc.add(toWei(v));
-      }, ethers.BigNumber.from(0));
-      const unallocatedWei = userWei.gt(userAllocatedSumWei) ? userWei.sub(userAllocatedSumWei) : ethers.BigNumber.from(0);
+      const unallocatedWei = ethers.utils.parseUnits(unallocatedPrincipal.toString(), 18);
       const remainingWei = ethers.utils.parseUnits(remainingForSelected || '0', 18);
       const minWei = unallocatedWei.lt(remainingWei) ? unallocatedWei : remainingWei;
       return ethers.utils.formatUnits(minWei, 18);
     } catch {
       return '0';
     }
-  }, [userSharesStr, remainingForSelected, userStrategyAllocations]);
+  }, [unallocatedPrincipal, remainingForSelected]);
 
   const maxUnallocate = useMemo(() => {
-    // Max withdraw = user's allocated amount for that strategy
+    // Max un-allocate = current value allocated to selected strategy
     if (!selectedId) return '0';
     const idx = Number(selectedId) - 1;
-    // userStrategyAllocations[idx] is already a formatted string
-    const allocStr = userStrategyAllocations[idx] || "0";
+    const allocStr = (userStrategyAllocationsValue[idx] ?? userStrategyAllocations[idx] ?? "0");
     return allocStr;
-  }, [selectedId, userStrategyAllocations]);
+  }, [selectedId, userStrategyAllocations, userStrategyAllocationsValue]);
 
   // Formatted values with max 4 decimals for display
-  const userSharesFormatted = useMemo(() => formatWithMaxDecimals(userSharesStr, 4), [userSharesStr]);
+  const userSharesFormatted = useMemo(() => formatWithMaxDecimals(displaySharesStr, 4), [displaySharesStr]);
   const remainingForSelectedFormatted = useMemo(() => formatWithMaxDecimals(remainingForSelected, 4), [remainingForSelected]);
   const maxAllocFormatted = useMemo(() => formatWithMaxDecimals(maxAlloc, 4), [maxAlloc]);
   const maxUnallocateFormatted = useMemo(() => formatWithMaxDecimals(maxUnallocate, 4), [maxUnallocate]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSharesAndAllocations = async () => {
+      if (!dBank || !account) {
+        if (!cancelled) {
+          setUserSharesOnChain(null);
+          setAllocationSharesByStrategy([]);
+          setPricePerShare("0");
+          setUserSharesValue("0");
+          setUserUnallocatedValue("0");
+        }
+        return;
+      }
+
+      try {
+        const totalAssetsBN = await dBank.totalAssets();
+        const totalSupplyBN = await dBank.totalSupply();
+        const totalAssets = parseFloat(ethers.utils.formatUnits(totalAssetsBN, 18));
+        const totalSupply = parseFloat(ethers.utils.formatUnits(totalSupplyBN, 18));
+        const pps = totalSupply > 0 ? totalAssets / totalSupply : 1;
+        if (!cancelled) {
+          setPricePerShare(pps.toString());
+        }
+
+        const currentSharesBN = await dBank.balanceOf(account);
+        const currentShares = ethers.utils.formatUnits(currentSharesBN, 18);
+        if (!cancelled) {
+          setUserSharesOnChain(currentShares);
+          const allocatedValue = parseFloat(userTotalAllocatedValue || "0");
+          const unallocatedValue = Math.max(parseFloat(currentShares || "0") - parseFloat(userTotalAllocated || "0"), 0);
+          const totalValueNow = allocatedValue + unallocatedValue;
+          setUserSharesValue(totalValueNow.toString());
+          setUserUnallocatedValue(unallocatedValue.toString());
+        }
+
+        const allocationsSource = userStrategyAllocationsValue.length > 0
+          ? userStrategyAllocationsValue
+          : userStrategyAllocations;
+
+        if (allocationsSource && allocationsSource.length > 0) {
+          const allocationsInShares = [];
+          for (let idx = 0; idx < allocationsSource.length; idx++) {
+            const allocAssets = parseFloat(allocationsSource[idx] || "0");
+            if (allocAssets > 0) {
+              const allocShares = pps > 0 ? allocAssets / pps : 0;
+              allocationsInShares[idx] = allocShares;
+            } else {
+              allocationsInShares[idx] = 0;
+            }
+          }
+          if (!cancelled) {
+            setAllocationSharesByStrategy(allocationsInShares);
+          }
+        } else if (!cancelled) {
+          setAllocationSharesByStrategy([]);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setUserSharesOnChain(null);
+          setAllocationSharesByStrategy([]);
+        }
+      }
+    };
+
+    loadSharesAndAllocations();
+    return () => { cancelled = true; };
+  }, [dBank, account, userStrategyAllocations, userStrategyAllocationsValue, userTotalAllocated, userTotalAllocatedValue]);
 
   const handleMax = () => {
     if (!selectedId) return;
@@ -161,8 +241,11 @@ const Strategies = () => {
     // Pre-checks against max allowed
     const maxAllowedFloat = parseFloat(maxAlloc || '0');
     if (mode === 'allocate' && parseFloat(amount) > maxAllowedFloat) {
-      const totalAllocated = userStrategyAllocations.reduce((sum, v) => sum + parseFloat(v || '0'), 0);
-      const unallocated = parseFloat(userSharesStr || '0') - totalAllocated;
+      const allocationsForCalc = allocationSharesByStrategy.length > 0
+        ? allocationSharesByStrategy
+        : (userStrategyAllocationsValue.length > 0 ? userStrategyAllocationsValue : userStrategyAllocations);
+      const totalAllocated = allocationsForCalc.reduce((sum, v) => sum + parseFloat(v || '0'), 0);
+      const unallocated = parseFloat(displaySharesStr || '0') - totalAllocated;
       alert(`Cannot allocate more than ${maxAllowedFloat} shares. You have ${userSharesFormatted} total shares, with ${formatWithMaxDecimals(unallocated.toString(), 4)} unallocated.`);
       return;
     }
@@ -171,8 +254,11 @@ const Strategies = () => {
     if (mode === 'allocate') {
       try {
         const amountInWei = ethers.utils.parseUnits(amount, 18);
-        const userSharesBN = ethers.utils.parseUnits(userSharesStr || '0', 18);
-        const userAllocatedSumBN = userStrategyAllocations.reduce((acc, v) => {
+        const userSharesBN = ethers.utils.parseUnits(displaySharesStr || '0', 18);
+        const allocationsForCalc = allocationSharesByStrategy.length > 0
+          ? allocationSharesByStrategy
+          : (userStrategyAllocationsValue.length > 0 ? userStrategyAllocationsValue : userStrategyAllocations);
+        const userAllocatedSumBN = allocationsForCalc.reduce((acc, v) => {
           return acc.add(toWei(v));
         }, ethers.BigNumber.from(0));
         const unallocatedSharesBN = userSharesBN.gt(userAllocatedSumBN) ? userSharesBN.sub(userAllocatedSumBN) : ethers.BigNumber.from(0);
@@ -200,10 +286,29 @@ const Strategies = () => {
         const res = await allocateToStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch);
         ok = res.ok;
         hash = res.hash || null;
+        if (ok && account && res.hash) {
+          const existing = localStorage.getItem(`dBank_firstAllocation_${account}`);
+          if (!existing) {
+            try {
+              const receipt = await provider.waitForTransaction(res.hash);
+              if (receipt && receipt.blockNumber) {
+                const block = await provider.getBlock(receipt.blockNumber);
+                if (block && block.timestamp) {
+                  localStorage.setItem(`dBank_firstAllocation_${account}`, (block.timestamp * 1000).toString());
+                }
+              }
+            } catch (error) {
+              console.warn("Failed to store first allocation timestamp:", error.message);
+            }
+          }
+        }
       } else {
         const res = await unallocateFromStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch, 50);
         ok = res.ok;
         hash = res.hash || null;
+      }
+      if (ok && dBank && tokens && account) {
+        await loadBalances(dBank, tokens, account, dispatch);
       }
     } catch (error) {
       console.error("Error in handleSubmit:", error);
@@ -254,7 +359,7 @@ const Strategies = () => {
 
           <Row className='my-2 text-end'>
             <Form.Text style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
-              Total shares: {userSharesFormatted} | Remaining cap (selected): {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
+              Total shares: {userSharesFormatted} | PPS: {formatWithMaxDecimals(pricePerShare, 2)} | Total value: {formatWithMaxDecimals(userSharesValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Allocated value: {formatWithMaxDecimals(userTotalAllocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Unallocated value: {formatWithMaxDecimals(userUnallocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Remaining cap (selected): {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
             </Form.Text>
           </Row>
 
@@ -348,9 +453,9 @@ const Strategies = () => {
             <thead style={{ backgroundColor: 'transparent' }}>
               <tr style={{ backgroundColor: 'transparent' }}>
                 <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', width: '30%' }}>Strategy</th>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>Shares</th>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{symbols && symbols[0] ? symbols[0] : 'USDC'}</th>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '30%' }}>% of your shares</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>Shares (equiv.)</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{symbols && symbols[0] ? symbols[0] : 'USDC'} (value)</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '30%' }}>% of your total value</th>
               </tr>
             </thead>
             <tbody style={{ backgroundColor: 'transparent' }}>
@@ -361,20 +466,18 @@ const Strategies = () => {
               )}
               {strategies.map((s, idx) => {
                 // userStrategyAllocations[idx] is already a formatted string from loadUserStrategyAllocations
-                const allocRaw = userStrategyAllocations[idx] || "0";
-                const alloc = formatWithMaxDecimals(allocRaw, 4);
-                const allocUsd = alloc; // Assuming allocated is in asset units
-                const allocWei = ethers.utils.parseUnits(allocRaw || '0', 18);
-                const userSharesWei = ethers.utils.parseUnits(userSharesStr || '0', 18);
-                const pctBps = userSharesWei.gt(0)
-                  ? allocWei.mul(ethers.BigNumber.from(10000)).div(userSharesWei) // basis points vs user total shares
-                  : ethers.BigNumber.from(0);
-                const pctRaw = ethers.utils.formatUnits(pctBps, 2); // two decimals, already %
-                const pctStr = formatWithMaxDecimals(pctRaw, 4);
+                const allocRaw = (userStrategyAllocationsValue[idx] ?? userStrategyAllocations[idx] ?? "0");
+                const allocUsd = formatWithMaxDecimals(allocRaw, 4);
+                const allocShares = allocationSharesByStrategy[idx] || 0;
+                const allocSharesFormatted = formatWithMaxDecimals(allocShares, 4);
+                const totalValue = parseFloat(userSharesValue || "0") + parseFloat(userTotalAllocatedValue || "0");
+                const rawPct = totalValue > 0 ? (parseFloat(allocRaw || "0") / totalValue) * 100 : 0;
+                const pctClamped = Math.min(rawPct, 100);
+                const pctStr = formatWithMaxDecimals(pctClamped.toString(), 2);
                 return (
                   <tr key={s.id || idx} style={{ backgroundColor: 'transparent' }}>
                     <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', width: '30%' }}>{`Strategy ${s.id}`}</td>
-                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{alloc}</td>
+                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{allocSharesFormatted}</td>
                     <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{allocUsd}</td>
                     <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'right', width: '30%' }}>{pctStr}%</td>
                   </tr>

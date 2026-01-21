@@ -1,26 +1,31 @@
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { ethers } from 'ethers';
 import { useEffect, useState, useMemo } from 'react';
 import { Card, Row, Col, OverlayTrigger, Popover, Button } from 'react-bootstrap';
 import Chart from 'react-apexcharts';
 import Loading from './Loading';
+import { loadUserStrategyAllocations } from '../store/interactions';
 
 const Charts = () => {
     const provider = useSelector(state => state.provider.connection);
     const account = useSelector(state => state.provider.account);
+    const dispatch = useDispatch();
     
     const strategiesRaw = useSelector(state => state.strategyRouter.strategies);
     const strategyActiveRaw = useSelector(state => state.strategyRouter.strategyActive);
+    const strategyRouter = useSelector(state => state.strategyRouter.contract);
     const symbols = useSelector(state => state.tokens.symbols) || [];
     
     const dBank = useSelector(state => state.dBank.contract);
     const userSharesRaw = useSelector(state => state.dBank.shares);
     const userStrategyAllocationsRaw = useSelector(state => state.strategyRouter.userStrategyAllocations);
+    const userStrategyAllocationsValueRaw = useSelector(state => state.strategyRouter.userStrategyAllocationsValue);
 
     // Wrap in useMemo to prevent unnecessary re-renders
     const strategies = useMemo(() => strategiesRaw || [], [strategiesRaw]);
     const strategyActive = useMemo(() => strategyActiveRaw || [], [strategyActiveRaw]);
     const userStrategyAllocations = useMemo(() => userStrategyAllocationsRaw || [], [userStrategyAllocationsRaw]);
+    const userStrategyAllocationsValue = useMemo(() => userStrategyAllocationsValueRaw || [], [userStrategyAllocationsValueRaw]);
 
     const [loading, setLoading] = useState(true);
     const [pricePerShare, setPricePerShare] = useState("0");
@@ -29,6 +34,9 @@ const Charts = () => {
         userSharesValue: []
     });
     const [userFirstDepositTimestamp, setUserFirstDepositTimestamp] = useState(null);
+    const [userFirstAllocationTimestamp, setUserFirstAllocationTimestamp] = useState(null);
+    const [lastBlockTimestamp, setLastBlockTimestamp] = useState(null);
+    const [userSharesOnChain, setUserSharesOnChain] = useState(null);
 
     // Load user's first deposit timestamp
     useEffect(() => {
@@ -71,6 +79,77 @@ const Charts = () => {
 
         loadFirstDepositTimestamp();
     }, [dBank, account, provider]);
+
+    // Load user's first allocation timestamp from localStorage
+    useEffect(() => {
+        if (!account) {
+            setUserFirstAllocationTimestamp(null);
+            return;
+        }
+        const storedTimestamp = localStorage.getItem(`dBank_firstAllocation_${account}`);
+        if (storedTimestamp) {
+            setUserFirstAllocationTimestamp(parseInt(storedTimestamp));
+        } else {
+            setUserFirstAllocationTimestamp(null);
+        }
+    }, [account]);
+
+    // Load last block timestamp and convert allocations to shares
+    useEffect(() => {
+        const loadLastBlockAndConvertAllocations = async () => {
+            if (!provider || !dBank || !account) {
+                setLastBlockTimestamp(null);
+                setUserAllocationShares([]);
+                return;
+            }
+
+            try {
+                // Get last block timestamp
+                const lastBlock = await provider.getBlock('latest');
+                setLastBlockTimestamp(lastBlock.timestamp * 1000);
+
+                const allocationsSource = userStrategyAllocationsValue.length > 0
+                    ? userStrategyAllocationsValue
+                    : userStrategyAllocations;
+
+                // Convert user allocations (assets) to shares
+                if (allocationsSource && allocationsSource.length > 0 && strategies.length > 0) {
+                    const allocationsInShares = [];
+                    
+                    for (let idx = 0; idx < strategies.length; idx++) {
+                        if (strategyActive[idx]) {
+                            const userAllocAssets = parseFloat(allocationsSource[idx] || "0");
+                            if (userAllocAssets > 0.0001) {
+                                try {
+                                    const allocAssetsBN = ethers.utils.parseUnits(userAllocAssets.toString(), 18);
+                                    const allocSharesBN = await dBank.convertToShares(allocAssetsBN);
+                                    const allocShares = parseFloat(ethers.utils.formatUnits(allocSharesBN, 18));
+                                    allocationsInShares.push(allocShares);
+                                } catch (error) {
+                                    console.error(`Error converting allocation for strategy ${strategies[idx].id}:`, error);
+                                    allocationsInShares.push(0);
+                                }
+                            } else {
+                                allocationsInShares.push(0);
+                            }
+                        } else {
+                            allocationsInShares.push(0);
+                        }
+                    }
+                    
+                    setUserAllocationShares(allocationsInShares);
+                } else {
+                    setUserAllocationShares([]);
+                }
+            } catch (error) {
+                console.error('Error loading last block or converting allocations:', error);
+                setLastBlockTimestamp(null);
+                setUserAllocationShares([]);
+            }
+        };
+
+        loadLastBlockAndConvertAllocations();
+    }, [provider, dBank, account, userStrategyAllocations, userStrategyAllocationsValue, strategies, strategyActive]);
 
     // Load historical data from blockchain events
     useEffect(() => {
@@ -214,6 +293,10 @@ const Charts = () => {
             if (!dBank || !provider) return;
 
             try {
+                // Get current block timestamp
+                const currentBlock = await provider.getBlock('latest');
+                setLastBlockTimestamp(currentBlock.timestamp * 1000);
+                
                 // Get current price per share
                 const totalAssetsBN = await dBank.totalAssets();
                 const totalAssets = parseFloat(ethers.utils.formatUnits(totalAssetsBN, 18));
@@ -222,9 +305,25 @@ const Charts = () => {
                 const currentPricePerShare = totalSupply > 0 ? totalAssets / totalSupply : 1;
                 
                 setPricePerShare(currentPricePerShare.toString());
+
+                if (strategyRouter && account) {
+                    await loadUserStrategyAllocations(strategyRouter, account, dispatch);
+                }
                 
+                // Fetch current user shares for value series
+                let currentUserShares = 0;
+                if (account) {
+                    try {
+                        const currentSharesBN = await dBank.balanceOf(account);
+                        currentUserShares = parseFloat(ethers.utils.formatUnits(currentSharesBN, 18));
+                        setUserSharesOnChain(currentUserShares.toString());
+                    } catch (error) {
+                        console.error("Error parsing user shares:", error);
+                    }
+                }
+
                 // Add current point to history if it's different from last point
-                const currentTimestamp = Date.now();
+                const currentTimestamp = currentBlock.timestamp * 1000;
                 setHistoricalData(prev => {
                     const lastPricePoint = prev.pricePerShare[prev.pricePerShare.length - 1];
                     const priceHistory = [...prev.pricePerShare];
@@ -240,19 +339,8 @@ const Charts = () => {
                     
                     // Update user shares value if account is connected
                     let userSharesValueHistory = [...prev.userSharesValue];
-                    if (account && userSharesRaw) {
-                        let userShares = 0;
-                        try {
-                            if (ethers.BigNumber.isBigNumber(userSharesRaw)) {
-                                userShares = parseFloat(ethers.utils.formatUnits(userSharesRaw, 18));
-                            } else {
-                                userShares = parseFloat(userSharesRaw || "0");
-                            }
-                        } catch (error) {
-                            console.error("Error parsing user shares:", error);
-                        }
-                        
-                        const currentUserValue = userShares * currentPricePerShare;
+                    if (account) {
+                        const currentUserValue = currentUserShares * currentPricePerShare;
                         const lastUserValuePoint = userSharesValueHistory[userSharesValueHistory.length - 1];
                         
                         // Only add if it's been at least 1 minute since last point or value changed significantly
@@ -284,7 +372,7 @@ const Charts = () => {
         const interval = setInterval(loadChartData, 30000);
         return () => clearInterval(interval);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [dBank, provider, account, userSharesRaw]);
+    }, [dBank, provider, account]);
 
     // Helper functions for localStorage
     const getHistoricalData = (key) => {
@@ -339,7 +427,9 @@ const Charts = () => {
         // Get user total shares
         let userTotalShares = 0;
         try {
-            if (userSharesRaw) {
+            if (userSharesOnChain) {
+                userTotalShares = parseFloat(userSharesOnChain || "0");
+            } else if (userSharesRaw) {
                 if (ethers.BigNumber.isBigNumber(userSharesRaw)) {
                     userTotalShares = parseFloat(ethers.utils.formatUnits(userSharesRaw, 18));
                 } else {
@@ -350,45 +440,61 @@ const Charts = () => {
             console.error("Error parsing user shares:", error);
         }
 
-        if (userTotalShares === 0) return { labels: [], series: [] };
+        const currentPps = parseFloat(pricePerShare || "0");
+        const totalUserValue = userTotalShares * currentPps;
 
-        // Calculate total allocated
-        const totalAllocated = userStrategyAllocations.reduce((sum, val) => {
-            return sum + parseFloat(val || "0");
-        }, 0);
+        if (totalUserValue === 0 && (!userStrategyAllocationsValue || userStrategyAllocationsValue.length === 0)) {
+            return { labels: [], series: [] };
+        }
 
         const labels = [];
         const series = [];
+        let totalAllocatedShares = 0;
 
-        // Add allocated strategies
+        const allocationsSource = userStrategyAllocationsValue && userStrategyAllocationsValue.length > 0
+            ? userStrategyAllocationsValue
+            : userStrategyAllocations;
+
         strategies.forEach((s, idx) => {
-            if (strategyActive[idx]) {
-                const userAlloc = parseFloat(userStrategyAllocations[idx] || "0");
-                if (userAlloc > 0.0001) { // Use threshold to avoid floating point issues
+            if (strategyActive[idx] && allocationsSource[idx] !== undefined) {
+                const allocValue = parseFloat(allocationsSource[idx] || "0");
+                if (allocValue > 0.0001) {
                     labels.push(`Strategy ${s.id}`);
-                    series.push(userAlloc);
+                    series.push(allocValue);
+                    totalAllocatedShares += allocValue;
                 }
             }
         });
 
-        // Calculate unallocated portion
-        const unallocated = userTotalShares - totalAllocated;
+        // Calculate unallocated portion (total value minus allocated)
+        const unallocated = Math.max(totalUserValue - totalAllocatedShares, 0);
         
         // Only add unallocated if it's significant and there are other allocations
-        if (unallocated > 0.0001 && totalAllocated > 0.0001) {
+        if (unallocated > 0.0001 && totalAllocatedShares > 0.0001) {
             labels.push("Unallocated");
             series.push(unallocated);
-        } else if (totalAllocated === 0 && userTotalShares > 0.0001) {
+        } else if (totalAllocatedShares === 0 && unallocated > 0.0001) {
             // Only show unallocated if there are no allocations at all
             labels.push("Unallocated");
-            series.push(userTotalShares);
+            series.push(unallocated);
         }
 
         // If no shares at all, return empty
         if (series.length === 0) return { labels: [], series: [] };
 
-        return { labels, series, userTotalShares };
-    }, [account, strategies, userStrategyAllocations, strategyActive, userSharesRaw]);
+        const totalValue = unallocated + totalAllocatedShares;
+        return { labels, series, userTotalShares, totalUserValue, totalValue };
+    }, [account, strategies, strategyActive, userSharesRaw, userSharesOnChain, userStrategyAllocationsValue, userStrategyAllocations, pricePerShare]);
+
+    const chartStartTimestamp = userFirstAllocationTimestamp || userFirstDepositTimestamp || undefined;
+    const filteredPriceHistory = useMemo(() => {
+        if (!chartStartTimestamp) return historicalData.pricePerShare;
+        return historicalData.pricePerShare.filter(point => point.x >= chartStartTimestamp);
+    }, [historicalData.pricePerShare, chartStartTimestamp]);
+    const filteredUserValueHistory = useMemo(() => {
+        if (!chartStartTimestamp) return historicalData.userSharesValue;
+        return historicalData.userSharesValue.filter(point => point.x >= chartStartTimestamp);
+    }, [historicalData.userSharesValue, chartStartTimestamp]);
 
     // Chart 2: Price per Share Evolution (Line Chart)
     const pricePerShareOptions = useMemo(() => ({
@@ -402,9 +508,11 @@ const Charts = () => {
         stroke: { curve: 'smooth', width: 2 },
         xaxis: {
             type: 'datetime',
+            min: chartStartTimestamp,
+            max: lastBlockTimestamp || undefined,
             labels: {
                 datetimeUTC: false,
-                format: getDateTimeFormat(historicalData.pricePerShare, userFirstDepositTimestamp)
+                format: getDateTimeFormat(filteredPriceHistory, chartStartTimestamp)
             }
         },
         yaxis: {
@@ -425,7 +533,7 @@ const Charts = () => {
         legend: {
             show: false
         }
-    }), [historicalData.pricePerShare, userFirstDepositTimestamp]);
+    }), [filteredPriceHistory, chartStartTimestamp, lastBlockTimestamp]);
 
     // Chart 3: User Shares Value Evolution (Line Chart) - only if user is connected
     const userSharesValueOptions = useMemo(() => ({
@@ -439,9 +547,11 @@ const Charts = () => {
         stroke: { curve: 'smooth', width: 2 },
         xaxis: {
             type: 'datetime',
+            min: chartStartTimestamp,
+            max: lastBlockTimestamp || undefined,
             labels: {
                 datetimeUTC: false,
-                format: getDateTimeFormat(historicalData.userSharesValue, userFirstDepositTimestamp)
+                format: getDateTimeFormat(filteredUserValueHistory, chartStartTimestamp)
             }
         },
         yaxis: {
@@ -466,7 +576,7 @@ const Charts = () => {
         legend: {
             show: false
         }
-    }), [historicalData.userSharesValue, userFirstDepositTimestamp]);
+    }), [filteredUserValueHistory, chartStartTimestamp, lastBlockTimestamp]);
 
     // Memoize Popovers to prevent infinite re-renders
     const userAllocationDistributionPopover = useMemo(() => (
@@ -488,10 +598,12 @@ const Charts = () => {
 
     // Calculate current user shares value
     let currentUserSharesValue = 0;
-    if (account && userSharesRaw && pricePerShare) {
+    if (account && pricePerShare) {
         try {
             let userShares = 0;
-            if (ethers.BigNumber.isBigNumber(userSharesRaw)) {
+            if (userSharesOnChain) {
+                userShares = parseFloat(userSharesOnChain || "0");
+            } else if (ethers.BigNumber.isBigNumber(userSharesRaw)) {
                 userShares = parseFloat(ethers.utils.formatUnits(userSharesRaw, 18));
             } else {
                 userShares = parseFloat(userSharesRaw || "0");
@@ -550,7 +662,7 @@ const Charts = () => {
                                         theme: { mode: 'dark' },
                                         dataLabels: {
                                             formatter: (val, opts) => {
-                                                const totalShares = userAllocationData.userTotalShares || 1;
+                                                const totalValue = userAllocationData.totalValue || 1;
                                                 let absoluteValue = 0;
                                                 
                                                 if (opts && opts.w && opts.w.config && opts.w.config.series && opts.seriesIndex !== undefined) {
@@ -561,7 +673,7 @@ const Charts = () => {
                                                     absoluteValue = userAllocationData.series[opts.dataPointIndex] || 0;
                                                 }
                                                 
-                                                const percentage = (absoluteValue / totalShares) * 100;
+                                                const percentage = (absoluteValue / totalValue) * 100;
                                                 return percentage.toFixed(1) + '%';
                                             }
                                         },
@@ -569,7 +681,7 @@ const Charts = () => {
                                             y: {
                                                 formatter: (val, opts) => {
                                                     const symbol = symbols[0] || 'USDC';
-                                                    const totalShares = userAllocationData.userTotalShares || 1;
+                                                    const totalValue = userAllocationData.totalValue || 1;
                                                     let absoluteValue = 0;
                                                     
                                                     if (opts && opts.w && opts.w.config && opts.w.config.series && opts.seriesIndex !== undefined) {
@@ -580,7 +692,7 @@ const Charts = () => {
                                                         absoluteValue = userAllocationData.series[opts.dataPointIndex] || 0;
                                                     }
                                                     
-                                                    const percentage = (absoluteValue / totalShares) * 100;
+                                                    const percentage = (absoluteValue / totalValue) * 100;
                                                     return `${parseFloat(absoluteValue).toFixed(2)} ${symbol} (${percentage.toFixed(1)}%)`;
                                                 }
                                             }
@@ -601,10 +713,10 @@ const Charts = () => {
                 <Col md={6} className="mb-4">
                     <Card style={{ backgroundColor: '#1a1d29', borderColor: 'rgba(255, 255, 255, 0.1)' }}>
                         <Card.Body>
-                            {historicalData.pricePerShare.length > 0 ? (
+                            {filteredPriceHistory.length > 0 ? (
                                 <Chart
                                     options={pricePerShareOptions}
-                                    series={[{ name: 'Price per Share', data: historicalData.pricePerShare }]}
+                                    series={[{ name: 'Price per Share', data: filteredPriceHistory }]}
                                     type="line"
                                     height={300}
                                 />
@@ -627,10 +739,10 @@ const Charts = () => {
                     <Col md={6} className="mb-4">
                         <Card style={{ backgroundColor: '#1a1d29', borderColor: 'rgba(255, 255, 255, 0.1)' }}>
                             <Card.Body>
-                                {historicalData.userSharesValue.length > 0 ? (
+                                {filteredUserValueHistory.length > 0 ? (
                                     <Chart
                                         options={userSharesValueOptions}
-                                        series={[{ name: 'Your Shares Value', data: historicalData.userSharesValue }]}
+                                        series={[{ name: 'Your Shares Value', data: filteredUserValueHistory }]}
                                         type="line"
                                         height={300}
                                     />

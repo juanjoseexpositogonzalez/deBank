@@ -43,6 +43,8 @@ import {
     setTotalAllocated,
     setUserStrategyAllocations,
     setUserTotalAllocated,
+    setUserStrategyAllocationsValue,
+    setUserTotalAllocatedValue,
 } from './reducers/strategyRouter';
 
 import {
@@ -347,6 +349,8 @@ export const loadUserStrategyAllocations = async (strategyRouter, account, dispa
     if (!strategyRouter || !account) {
         dispatch(setUserStrategyAllocations([]));
         dispatch(setUserTotalAllocated("0"));
+        dispatch(setUserStrategyAllocationsValue([]));
+        dispatch(setUserTotalAllocatedValue("0"));
         return;
     }
 
@@ -358,6 +362,8 @@ export const loadUserStrategyAllocations = async (strategyRouter, account, dispa
 
         // Get allocations per strategy
         const userAllocations = [];
+        const userAllocationsValue = [];
+        let userTotalAllocatedValueBN = ethers.BigNumber.from(0);
         const totalStrategiesBN = await strategyRouter.totalStrategies();
         const totalStrategies = totalStrategiesBN.toNumber();
         
@@ -366,16 +372,45 @@ export const loadUserStrategyAllocations = async (strategyRouter, account, dispa
                 const allocationBN = await strategyRouter.getUserStrategyAllocation(account, i);
                 const allocation = ethers.utils.formatUnits(allocationBN, 18);
                 userAllocations.push(allocation);
+
+                // Compute current value of allocation based on strategy totalAssets
+                let allocationValueBN = ethers.BigNumber.from(0);
+                if (allocationBN.gt(0)) {
+                    const [strategyAddress, , , strategyAllocatedBN] = await strategyRouter.getStrategy(i);
+                    if (strategyAddress && strategyAddress !== ethers.constants.AddressZero && strategyAllocatedBN.gt(0)) {
+                        try {
+                            const strategy = new ethers.Contract(
+                                strategyAddress,
+                                ["function totalAssets() view returns (uint256)"],
+                                strategyRouter.provider
+                            );
+                            const strategyTotalAssetsBN = await strategy.totalAssets();
+                            allocationValueBN = allocationBN.mul(strategyTotalAssetsBN).div(strategyAllocatedBN);
+                        } catch (error) {
+                            allocationValueBN = allocationBN;
+                        }
+                    } else {
+                        allocationValueBN = allocationBN;
+                    }
+                }
+
+                userAllocationsValue.push(ethers.utils.formatUnits(allocationValueBN, 18));
+                userTotalAllocatedValueBN = userTotalAllocatedValueBN.add(allocationValueBN);
             } catch (error) {
                 userAllocations.push("0");
+                userAllocationsValue.push("0");
             }
         }
         
         dispatch(setUserStrategyAllocations(userAllocations));
+        dispatch(setUserStrategyAllocationsValue(userAllocationsValue));
+        dispatch(setUserTotalAllocatedValue(ethers.utils.formatUnits(userTotalAllocatedValueBN, 18)));
     } catch (error) {
         console.error("Error loading user strategy allocations:", error);
         dispatch(setUserStrategyAllocations([]));
         dispatch(setUserTotalAllocated("0"));
+        dispatch(setUserStrategyAllocationsValue([]));
+        dispatch(setUserTotalAllocatedValue("0"));
     }
 }
 

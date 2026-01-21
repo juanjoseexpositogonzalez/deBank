@@ -27,6 +27,7 @@
         "build": "react-scripts build",
         "test": "react-scripts test",
         "eject": "react-scripts eject",
+        "frontend:start": "npx hardhat run scripts/deploy.js --network localhost && npx hardhat run scripts/seed.js --network localhost && npm run start",
         "advance-time": "hardhat run scripts/advanceTime.js --network localhost",
         "advance-time:1day": "ADVANCE_DAYS=1 hardhat run scripts/advanceTime.js --network localhost",
         "advance-time:7days": "ADVANCE_DAYS=7 hardhat run scripts/advanceTime.js --network localhost",

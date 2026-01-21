@@ -14,7 +14,9 @@ export const strategyRouter = createSlice({
         strategyAllocated: [],
         totalAllocated: 0,
         userStrategyAllocations: [], // Array of allocations per strategy for current user
-        userTotalAllocated: "0", // Total allocated by current user
+        userTotalAllocated: "0", // Total allocated (principal) by current user
+        userStrategyAllocationsValue: [], // Array of current value per strategy for user
+        userTotalAllocatedValue: "0", // Total current value allocated by user
     },
     reducers: {
         setRouterContract: (state, action) => {
@@ -53,6 +55,12 @@ export const strategyRouter = createSlice({
         setUserTotalAllocated: (state, action) => {
             state.userTotalAllocated = action.payload;
         },
+        setUserStrategyAllocationsValue: (state, action) => {
+            state.userStrategyAllocationsValue = action.payload;
+        },
+        setUserTotalAllocatedValue: (state, action) => {
+            state.userTotalAllocatedValue = action.payload;
+        },
     }
 })
 
@@ -69,6 +77,8 @@ export const {
     setTotalAllocated,
     setUserStrategyAllocations,
     setUserTotalAllocated,
+    setUserStrategyAllocationsValue,
+    setUserTotalAllocatedValue,
 } = strategyRouter.actions;
 
 export default strategyRouter.reducer;
