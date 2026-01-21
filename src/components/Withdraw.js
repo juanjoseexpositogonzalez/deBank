@@ -109,7 +109,8 @@ const Withdraw = () => {
             // Get user's total allocated capital from StrategyRouter
             const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
             if (userTotalAllocatedBN.gt(0)) {
-                alert("No puedes retirar mientras tengas shares alocadas. Desaloca primero.");
+                // alert("No puedes retirar mientras tengas shares alocadas. Desaloca primero.");
+                alert("You cannot withdraw while you have shares allocated. Unallocate first.");
                 return;
             }
 
