@@ -94,62 +94,7 @@ const Charts = () => {
         }
     }, [account]);
 
-    // Load last block timestamp and convert allocations to shares
-    useEffect(() => {
-        const loadLastBlockAndConvertAllocations = async () => {
-            if (!provider || !dBank || !account) {
-                setLastBlockTimestamp(null);
-                setUserAllocationShares([]);
-                return;
-            }
-
-            try {
-                // Get last block timestamp
-                const lastBlock = await provider.getBlock('latest');
-                setLastBlockTimestamp(lastBlock.timestamp * 1000);
-
-                const allocationsSource = userStrategyAllocationsValue.length > 0
-                    ? userStrategyAllocationsValue
-                    : userStrategyAllocations;
-
-                // Convert user allocations (assets) to shares
-                if (allocationsSource && allocationsSource.length > 0 && strategies.length > 0) {
-                    const allocationsInShares = [];
-                    
-                    for (let idx = 0; idx < strategies.length; idx++) {
-                        if (strategyActive[idx]) {
-                            const userAllocAssets = parseFloat(allocationsSource[idx] || "0");
-                            if (userAllocAssets > 0.0001) {
-                                try {
-                                    const allocAssetsBN = ethers.utils.parseUnits(userAllocAssets.toString(), 18);
-                                    const allocSharesBN = await dBank.convertToShares(allocAssetsBN);
-                                    const allocShares = parseFloat(ethers.utils.formatUnits(allocSharesBN, 18));
-                                    allocationsInShares.push(allocShares);
-                                } catch (error) {
-                                    console.error(`Error converting allocation for strategy ${strategies[idx].id}:`, error);
-                                    allocationsInShares.push(0);
-                                }
-                            } else {
-                                allocationsInShares.push(0);
-                            }
-                        } else {
-                            allocationsInShares.push(0);
-                        }
-                    }
-                    
-                    setUserAllocationShares(allocationsInShares);
-                } else {
-                    setUserAllocationShares([]);
-                }
-            } catch (error) {
-                console.error('Error loading last block or converting allocations:', error);
-                setLastBlockTimestamp(null);
-                setUserAllocationShares([]);
-            }
-        };
-
-        loadLastBlockAndConvertAllocations();
-    }, [provider, dBank, account, userStrategyAllocations, userStrategyAllocationsValue, strategies, strategyActive]);
+    // Last block timestamp is refreshed in loadChartData()
 
     // Load historical data from blockchain events
     useEffect(() => {
