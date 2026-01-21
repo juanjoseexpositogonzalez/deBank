@@ -60,7 +60,7 @@ const Withdraw = () => {
         return num.toFixed(maxDecimals).replace(/\.?0+$/, '');
     };
 
-    // Calculate available shares for withdrawal (excluding allocated shares)
+    // Calculate available shares for withdrawal (block if allocated)
     const [availableShares, setAvailableShares] = useState(shares || "0");
     
     useEffect(() => {
@@ -70,12 +70,8 @@ const Withdraw = () => {
                 return;
             }
             try {
-                const sharesBN = ethers.utils.parseUnits(shares || "0", 18);
-                const userTotalAllocatedBN = ethers.utils.parseUnits(userTotalAllocated, 18);
-                // Convert allocated capital to shares
-                const allocatedSharesBN = await dBank.convertToShares(userTotalAllocatedBN);
-                const availableSharesBN = sharesBN.sub(allocatedSharesBN);
-                setAvailableShares(availableSharesBN.gt(0) ? ethers.utils.formatUnits(availableSharesBN, 18) : "0");
+                // If there is any allocation, block withdrawals
+                setAvailableShares("0");
             } catch (error) {
                 console.error("Error calculating available shares:", error);
                 setAvailableShares(shares || "0");
@@ -112,36 +108,19 @@ const Withdraw = () => {
 
             // Get user's total allocated capital from StrategyRouter
             const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
-            
-            // Calculate shares that will be withdrawn (based on usdcAmount, which is what we send to contract)
+            if (userTotalAllocatedBN.gt(0)) {
+                alert("No puedes retirar mientras tengas shares alocadas. Desaloca primero.");
+                return;
+            }
+
+            // Calculate shares that will be withdrawn (based on usdcAmount)
             const assetsToWithdrawBN = ethers.utils.parseUnits(usdcAmount, 18);
             const sharesToWithdrawBN = await dBank.convertToShares(assetsToWithdrawBN);
-            
-            // If user has allocated capital, convert it to shares equivalent
-            if (userTotalAllocatedBN.gt(0)) {
-                const allocatedSharesBN = await dBank.convertToShares(userTotalAllocatedBN);
-                const allocatedShares = parseFloat(ethers.utils.formatUnits(allocatedSharesBN, 18));
-                
-                // Calculate available (unallocated) shares
-                const availableSharesBN = currentSharesBN.sub(allocatedSharesBN);
-                const availableShares = parseFloat(ethers.utils.formatUnits(availableSharesBN, 18));
-                
-                // Check if trying to withdraw more than available shares
-                if (sharesToWithdrawBN.gt(availableSharesBN)) {
-                    alert(
-                        `Cannot withdraw. You have ${allocatedShares.toFixed(4)} shares allocated to strategies ` +
-                        `(out of ${currentShares.toFixed(4)} total shares). ` +
-                        `You can only withdraw up to ${availableShares.toFixed(4)} shares. ` +
-                        `Please un-allocate some shares first.`
-                    );
-                    return;
-                }
-            } else {
-                // Even if no allocated capital, verify we're not withdrawing more than total shares
-                if (sharesToWithdrawBN.gt(currentSharesBN)) {
-                    alert(`Cannot withdraw. You only have ${currentShares.toFixed(4)} shares.`);
-                    return;
-                }
+
+            // Verify we're not withdrawing more than total shares
+            if (sharesToWithdrawBN.gt(currentSharesBN)) {
+                alert(`Cannot withdraw. You only have ${currentShares.toFixed(4)} shares.`);
+                return;
             }
         } catch (error) {
             console.error("Error validating withdrawal:", error);
@@ -199,27 +178,22 @@ const Withdraw = () => {
         if (!dBank || !strategyRouter || !account) return;
 
         try {
-            // Get fresh data from contracts
-            const currentSharesBN = await dBank.balanceOf(account);
             const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
-            
-            let availableSharesBN = currentSharesBN;
-            
-            // If user has allocated capital, calculate available shares
             if (userTotalAllocatedBN.gt(0)) {
-                const allocatedSharesBN = await dBank.convertToShares(userTotalAllocatedBN);
-                availableSharesBN = currentSharesBN.sub(allocatedSharesBN);
-            }
-            
-            if (availableSharesBN.lte(0)) {
-                alert("You don't have any unallocated shares to withdraw. Please un-allocate some shares first.");
+                alert("No puedes retirar mientras tengas shares alocadas. Desaloca primero.");
                 return;
             }
-            
-            const availableShares = ethers.utils.formatUnits(availableSharesBN, 18);
-            const assetsInWei = await dBank.convertToAssets(availableSharesBN);
+
+            const currentSharesBN = await dBank.balanceOf(account);
+            if (currentSharesBN.lte(0)) {
+                alert("You don't have any shares to withdraw.");
+                return;
+            }
+
+            const availableShares = ethers.utils.formatUnits(currentSharesBN, 18);
+            const assetsInWei = await dBank.convertToAssets(currentSharesBN);
             const assetsFormatted = ethers.utils.formatUnits(assetsInWei, 18);
-            
+
             setSharesAmount(availableShares);
             setUsdcAmount(assetsFormatted);
         } catch (error) {
@@ -233,27 +207,22 @@ const Withdraw = () => {
         if (!dBank || !strategyRouter || !account) return;
 
         try {
-            // Get fresh data from contracts
-            const currentSharesBN = await dBank.balanceOf(account);
             const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
-            
-            let availableSharesBN = currentSharesBN;
-            
-            // If user has allocated capital, calculate available shares
             if (userTotalAllocatedBN.gt(0)) {
-                const allocatedSharesBN = await dBank.convertToShares(userTotalAllocatedBN);
-                availableSharesBN = currentSharesBN.sub(allocatedSharesBN);
-            }
-            
-            if (availableSharesBN.lte(0)) {
-                alert("You don't have any unallocated shares to withdraw. Please un-allocate some shares first.");
+                alert("No puedes retirar mientras tengas shares alocadas. Desaloca primero.");
                 return;
             }
-            
-            const availableShares = ethers.utils.formatUnits(availableSharesBN, 18);
-            const assetsInWei = await dBank.convertToAssets(availableSharesBN);
+
+            const currentSharesBN = await dBank.balanceOf(account);
+            if (currentSharesBN.lte(0)) {
+                alert("You don't have any shares to withdraw.");
+                return;
+            }
+
+            const availableShares = ethers.utils.formatUnits(currentSharesBN, 18);
+            const assetsInWei = await dBank.convertToAssets(currentSharesBN);
             const assetsFormatted = ethers.utils.formatUnits(assetsInWei, 18);
-            
+
             setSharesAmount(availableShares);
             setUsdcAmount(assetsFormatted);
         } catch (error) {

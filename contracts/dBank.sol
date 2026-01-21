@@ -269,18 +269,8 @@ contract dBank {
         shares = this.convertToShares(_assets);
         // 4. Verify shares <= balanceOf[owner]
         if (shares > balanceOf[_owner]) revert dBank__InsufficientShares();
-        // 4.5. Verify user doesn't have allocated shares
-        StrategyRouter router = StrategyRouter(strategyRouter);
-        uint256 userTotalAllocated = router.getUserTotalAllocated(_owner);
-        if (userTotalAllocated > 0) {
-            // Convert user's allocated capital to shares equivalent
-            uint256 allocatedShares = this.convertToShares(userTotalAllocated);
-            // Check if user is trying to withdraw more than unallocated shares
-            uint256 unallocatedShares = balanceOf[_owner] - allocatedShares;
-            if (shares > unallocatedShares) {
-                revert dBank__SharesAllocated(allocatedShares);
-            }
-        }
+        // 4.5. Prevent withdrawals while user has allocated shares
+        _revertIfAllocatedShares(_owner, shares);
         // 5. Burn shares from owner
         _burn(_owner, shares);
         // 6. Serve withdrawal
@@ -312,18 +302,8 @@ contract dBank {
         if (_shares == 0) revert dBank__InvalidAmount();
         // 2. Calculate assets
         assets = this.convertToAssets(_shares);
-        // 2.5. Verify user doesn't have allocated shares
-        StrategyRouter router = StrategyRouter(strategyRouter);
-        uint256 userTotalAllocated = router.getUserTotalAllocated(_owner);
-        if (userTotalAllocated > 0) {
-            // Convert user's allocated capital to shares equivalent
-            uint256 allocatedShares = this.convertToShares(userTotalAllocated);
-            // Check if user is trying to redeem more than unallocated shares
-            uint256 unallocatedShares = balanceOf[_owner] - allocatedShares;
-            if (_shares > unallocatedShares) {
-                revert dBank__SharesAllocated(allocatedShares);
-            }
-        }
+        // 2.5. Prevent redemptions while user has allocated shares
+        _revertIfAllocatedShares(_owner, _shares);
         // 3. Handle approval if owner != msg.sender
         if (_owner != msg.sender) {
             if (allowance[_owner][msg.sender] < _shares) revert dBank__InsufficientAllowance();
@@ -418,6 +398,15 @@ contract dBank {
         totalSupply -= _amount;
         
         emit Transfer(_from, address(0), _amount);
+    }
+
+    function _revertIfAllocatedShares(address _owner, uint256 /* _requestedShares */) internal view {
+        StrategyRouter router = StrategyRouter(strategyRouter);
+        uint256 userTotalAllocated = router.getUserTotalAllocated(_owner);
+        if (userTotalAllocated == 0) return;
+
+        uint256 allocatedShares = this.convertToShares(userTotalAllocated);
+        revert dBank__SharesAllocated(allocatedShares);
     }
 
     //===========================================================

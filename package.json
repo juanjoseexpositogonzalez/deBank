@@ -31,7 +31,8 @@
         "advance-time:1day": "ADVANCE_DAYS=1 hardhat run scripts/advanceTime.js --network localhost",
         "advance-time:7days": "ADVANCE_DAYS=7 hardhat run scripts/advanceTime.js --network localhost",
         "advance-time:30days": "ADVANCE_DAYS=30 hardhat run scripts/advanceTime.js --network localhost",
-        "advance-time:1year": "ADVANCE_DAYS=365 hardhat run scripts/advanceTime.js --network localhost"
+        "advance-time:1year": "ADVANCE_DAYS=365 hardhat run scripts/advanceTime.js --network localhost",
+        "sync-abis": "node scripts/syncAbis.js"
     },
     "author": "expositogonzalez.juanjose@gmail.com",
     "license": "ISC",

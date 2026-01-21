@@ -99,6 +99,59 @@ const STRATEGY_ROUTER_ABI = normalizeABI(STRATEGY_ROUTER_ABI_RAW);
 const CONFIG_MANAGER_ABI = normalizeABI(CONFIG_MANAGER_ABI_RAW);
 const MOCK_S1_ABI = normalizeABI(MOCK_S1_ABI_RAW);
 
+const buildSelectorSet = (abi) => {
+    try {
+        const iface = new ethers.utils.Interface(abi);
+        return new Set(Object.keys(iface.functions).map((fn) => iface.getSighash(fn)));
+    } catch (error) {
+        console.warn("Failed to build selector set:", error.message);
+        return new Set();
+    }
+};
+
+const applyProviderCallFilter = (provider, chainId) => {
+    if (!provider || provider._callFilterApplied) return;
+    if (!config || !config[chainId]) return;
+
+    const addresses = config[chainId];
+    const addressToSelectors = new Map();
+
+    const addSelectors = (address, abi) => {
+        if (!address) return;
+        const selectorSet = buildSelectorSet(abi);
+        if (selectorSet.size > 0) {
+            addressToSelectors.set(address.toLowerCase(), selectorSet);
+        }
+    };
+
+    addSelectors(addresses.token?.address, TOKEN_ABI);
+    addSelectors(addresses.dbank?.address, DBANK_ABI);
+    addSelectors(addresses.strategyRouter?.address, STRATEGY_ROUTER_ABI);
+    addSelectors(addresses.configManager?.address, CONFIG_MANAGER_ABI);
+    addSelectors(addresses.mockS1?.address, MOCK_S1_ABI);
+
+    const originalCall = provider.call.bind(provider);
+    provider.call = async (tx, blockTag) => {
+        try {
+            const to = tx?.to ? tx.to.toLowerCase() : null;
+            const data = tx?.data;
+            if (to && data && data.length >= 10 && addressToSelectors.has(to)) {
+                const selector = data.slice(0, 10);
+                const allowed = addressToSelectors.get(to);
+                if (!allowed.has(selector)) {
+                    // Skip unsupported reads to avoid noisy reverts
+                    return "0x";
+                }
+            }
+        } catch (error) {
+            // Fall through to original call
+        }
+        return originalCall(tx, blockTag);
+    };
+
+    provider._callFilterApplied = true;
+};
+
 
 export const loadProvider = (dispatch) => {
     // Use 'any' to allow seamless network switching without provider invalidation
@@ -112,6 +165,7 @@ export const loadNetwork = async (provider, dispatch) => {
     const { chainId } = await provider.getNetwork()            
     
     dispatch(setNetwork(chainId))
+    applyProviderCallFilter(provider, chainId)
     return chainId
 }
 

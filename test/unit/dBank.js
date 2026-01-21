@@ -501,6 +501,24 @@ describe('dBank', () => {
             expect(balance).to.be.gte(withdrawAmount)
         })
 
+        it('withdraw reverts when user has allocations in strategies', async () => {
+            // Deploy and register MockS1
+            const MockS1 = await ethers.getContractFactory('MockS1')
+            const mockS1 = await MockS1.deploy(token.address)
+            await mockS1.setParams(500, tokens(1000000))
+            await strategyRouter.registerStrategy(1, mockS1.address, tokens(100000))
+
+            // Create a user allocation directly in the router
+            const allocationAmount = tokens(1)
+            await token.connect(receiver).approve(strategyRouter.address, allocationAmount)
+            await strategyRouter.connect(receiver).depositToStrategy(1, allocationAmount)
+
+            const withdrawAmount = SMALL_AMOUNT
+            await expect(
+                dbank.connect(receiver).withdraw(withdrawAmount, receiver.address, receiver.address)
+            ).to.be.revertedWithCustomError(dbank, 'dBank__SharesAllocated')
+        })
+
         it('withdraw burns correct shares', async () => {
             const assets = SMALL_AMOUNT // 0.000001 tokens
             const sharesBefore = await dbank.balanceOf(receiver.address)
