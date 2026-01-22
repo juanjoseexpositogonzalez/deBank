@@ -614,14 +614,19 @@ export const allocateToStrategy = async (provider, strategyRouter, tokens, accou
 export const unallocateFromStrategy = async (provider, strategyRouter, tokens, account, amount, strategyId, dispatch, maxSlippageBps = 50) => {
     try {
         const signer = provider.getSigner();
-        const amountInWei = ethers.utils.parseUnits(amount, 18);
+        let amountInWei = ethers.utils.parseUnits(amount, 18);
 
         const routerWithSigner = strategyRouter.connect(signer);
 
         // Ensure router holds tokens to return; approval not required for withdrawFromStrategy
         const routerBalance = await tokens[0].balanceOf(strategyRouter.address);
         if (routerBalance.lt(amountInWei)) {
-            console.warn('Router balance lower than requested un-allocation; call may revert.');
+            console.warn('Router balance lower than requested un-allocation; capping to available balance.');
+            amountInWei = routerBalance;
+        }
+
+        if (amountInWei.isZero()) {
+            return { ok: false, hash: null, error: 'Router has no liquidity for un-allocation.' };
         }
 
         const tx = await routerWithSigner.withdrawFromStrategy(strategyId, amountInWei, maxSlippageBps);

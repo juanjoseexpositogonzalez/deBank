@@ -93,4 +93,60 @@ describe('Integration Flow', () => {
             dbank.connect(user).withdraw(tokens(2000), user.address, user.address)
         ).to.be.revertedWithCustomError(dbank, 'dBank__SharesAllocated');
     });
+
+    it('un-allocate then withdraw shares after yield accrual', async () => {
+        // 1. User deposits 5000
+        await dbank.connect(user).deposit(tokens(5000), user.address);
+
+        // 2. User allocates 3500 to strategy
+        await strategyRouter.connect(user).depositToStrategy(1, tokens(3500));
+
+        // 3. Advance time 1 year
+        await ethers.provider.send('evm_increaseTime', [YEAR]);
+        await ethers.provider.send('evm_mine', []);
+
+        // Provide router liquidity to cover virtual yield
+        const principal = await mockS1.principal();
+        const strategyTotalAssets = await mockS1.totalAssets();
+        const yieldAmount = strategyTotalAssets.sub(principal);
+        if (yieldAmount.gt(0)) {
+            await token.transfer(strategyRouter.address, yieldAmount);
+        }
+
+        // 4. User un-allocates from strategy (withdraws full position)
+        await strategyRouter.connect(user).withdrawFromStrategy(1, strategyTotalAssets, 100);
+
+        // 5. User withdraws from vault successfully
+        await expect(
+            dbank.connect(user).withdraw(tokens(5000), user.address, user.address)
+        ).to.not.be.reverted;
+    });
+
+    it('un-allocate then withdraw assets (explicit withdraw flow)', async () => {
+        // 1. User deposits 5000
+        await dbank.connect(user).deposit(tokens(5000), user.address);
+
+        // 2. User allocates 3500 to strategy
+        await strategyRouter.connect(user).depositToStrategy(1, tokens(3500));
+
+        // 3. Advance time 1 year
+        await ethers.provider.send('evm_increaseTime', [YEAR]);
+        await ethers.provider.send('evm_mine', []);
+
+        // Provide router liquidity to cover virtual yield
+        const principal = await mockS1.principal();
+        const strategyTotalAssets = await mockS1.totalAssets();
+        const yieldAmount = strategyTotalAssets.sub(principal);
+        if (yieldAmount.gt(0)) {
+            await token.transfer(strategyRouter.address, yieldAmount);
+        }
+
+        // 4. User un-allocates from strategy
+        await strategyRouter.connect(user).withdrawFromStrategy(1, strategyTotalAssets, 100);
+
+        // 5. Withdraw a partial amount (assets-based withdrawal)
+        await expect(
+            dbank.connect(user).withdraw(tokens(1500), user.address, user.address)
+        ).to.not.be.reverted;
+    });
 });
