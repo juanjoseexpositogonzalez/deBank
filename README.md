@@ -69,6 +69,9 @@ npm test
 # Run specific test file
 npm test test/unit/MockS1.js
 npm test test/unit/StrategyRouter.js
+ 
+# Integration flow (deposit → allocate → time travel → un-allocate → withdraw)
+npm test test/integration/Flow.js
 
 # Generate coverage report
 npm run coverage
@@ -96,6 +99,14 @@ npx hardhat run scripts/seed.js --network localhost   # o sepolia
 npm run start
 # Abre http://localhost:3000 y selecciona la red (Hardhat o Sepolia)
 ```
+
+## 🧩 ABIs y sincronización
+- Tras cambios en contratos, sincroniza los ABIs del frontend:
+  - `npm run sync-abis`
+- Si vas a usar el front con red local: `npm run frontend:start` (deploy + seed + start).
+
+## 💧 Nota sobre un-allocate
+- El `un-allocate` requiere liquidez en el `StrategyRouter`. Si el rendimiento es virtual (MockS1), el router debe tener balance suficiente para devolver la parte de yield.
 
 ## 🧭 Seeding y configuración de redes
 - Direcciones por red en `src/config.json` (31337 Hardhat, 11155111 Sepolia).
