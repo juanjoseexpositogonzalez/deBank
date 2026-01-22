@@ -52,8 +52,6 @@ const Strategies = () => {
   const [userSharesOnChain, setUserSharesOnChain] = useState(null);
   const [allocationSharesByStrategy, setAllocationSharesByStrategy] = useState([]);
   const [pricePerShare, setPricePerShare] = useState("0");
-  const [userSharesValue, setUserSharesValue] = useState("0");
-  const [userUnallocatedValue, setUserUnallocatedValue] = useState("0");
   const userSharesStr = useMemo(() => {
     if (!userShares) return '0';
     if (Array.isArray(userShares)) return '0';
@@ -117,6 +115,15 @@ const Strategies = () => {
     return Math.max(totalShares - allocatedPrincipal, 0);
   }, [displaySharesStr, userTotalAllocated]);
 
+  const totalValue = useMemo(() => {
+    return parseFloat(userTotalAllocatedValue || "0") + unallocatedPrincipal;
+  }, [userTotalAllocatedValue, unallocatedPrincipal]);
+
+  const effectivePps = useMemo(() => {
+    const totalShares = parseFloat(displaySharesStr || "0");
+    return totalShares > 0 ? totalValue / totalShares : 1;
+  }, [displaySharesStr, totalValue]);
+
   const maxAlloc = useMemo(() => {
     // For allocate: min(unallocated principal, remaining cap)
     try {
@@ -152,8 +159,6 @@ const Strategies = () => {
           setUserSharesOnChain(null);
           setAllocationSharesByStrategy([]);
           setPricePerShare("0");
-          setUserSharesValue("0");
-          setUserUnallocatedValue("0");
         }
         return;
       }
@@ -172,11 +177,6 @@ const Strategies = () => {
         const currentShares = ethers.utils.formatUnits(currentSharesBN, 18);
         if (!cancelled) {
           setUserSharesOnChain(currentShares);
-          const allocatedValue = parseFloat(userTotalAllocatedValue || "0");
-          const unallocatedValue = Math.max(parseFloat(currentShares || "0") - parseFloat(userTotalAllocated || "0"), 0);
-          const totalValueNow = allocatedValue + unallocatedValue;
-          setUserSharesValue(totalValueNow.toString());
-          setUserUnallocatedValue(unallocatedValue.toString());
         }
 
         const allocationsSource = userStrategyAllocationsValue.length > 0
@@ -359,7 +359,7 @@ const Strategies = () => {
 
           <Row className='my-2 text-end'>
             <Form.Text style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
-              Total shares: {userSharesFormatted} | PPS: {formatWithMaxDecimals(pricePerShare, 2)} | Total value: {formatWithMaxDecimals(userSharesValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Allocated value: {formatWithMaxDecimals(userTotalAllocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Unallocated value: {formatWithMaxDecimals(userUnallocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Remaining cap (selected): {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
+              Total shares: {userSharesFormatted} | PPS (effective): {formatWithMaxDecimals(effectivePps, 2)} | Total value: {formatWithMaxDecimals(totalValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Allocated value: {formatWithMaxDecimals(userTotalAllocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Unallocated value: {formatWithMaxDecimals(unallocatedPrincipal.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Remaining cap (selected): {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
             </Form.Text>
           </Row>
 
@@ -453,7 +453,7 @@ const Strategies = () => {
             <thead style={{ backgroundColor: 'transparent' }}>
               <tr style={{ backgroundColor: 'transparent' }}>
                 <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', width: '30%' }}>Strategy</th>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>Shares (equiv.)</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>Allocated (principal)</th>
                 <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{symbols && symbols[0] ? symbols[0] : 'USDC'} (value)</th>
                 <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '30%' }}>% of your total value</th>
               </tr>
@@ -468,16 +468,15 @@ const Strategies = () => {
                 // userStrategyAllocations[idx] is already a formatted string from loadUserStrategyAllocations
                 const allocRaw = (userStrategyAllocationsValue[idx] ?? userStrategyAllocations[idx] ?? "0");
                 const allocUsd = formatWithMaxDecimals(allocRaw, 4);
-                const allocShares = allocationSharesByStrategy[idx] || 0;
-                const allocSharesFormatted = formatWithMaxDecimals(allocShares, 4);
-                const totalValue = parseFloat(userSharesValue || "0") + parseFloat(userTotalAllocatedValue || "0");
+                const allocPrincipal = userStrategyAllocations[idx] || "0";
+                const allocPrincipalFormatted = formatWithMaxDecimals(allocPrincipal, 4);
                 const rawPct = totalValue > 0 ? (parseFloat(allocRaw || "0") / totalValue) * 100 : 0;
                 const pctClamped = Math.min(rawPct, 100);
                 const pctStr = formatWithMaxDecimals(pctClamped.toString(), 2);
                 return (
                   <tr key={s.id || idx} style={{ backgroundColor: 'transparent' }}>
                     <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', width: '30%' }}>{`Strategy ${s.id}`}</td>
-                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{allocSharesFormatted}</td>
+                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{allocPrincipalFormatted}</td>
                     <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{allocUsd}</td>
                     <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'right', width: '30%' }}>{pctStr}%</td>
                   </tr>

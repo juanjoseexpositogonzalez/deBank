@@ -20,6 +20,8 @@ const Charts = () => {
     const userSharesRaw = useSelector(state => state.dBank.shares);
     const userStrategyAllocationsRaw = useSelector(state => state.strategyRouter.userStrategyAllocations);
     const userStrategyAllocationsValueRaw = useSelector(state => state.strategyRouter.userStrategyAllocationsValue);
+    const userTotalAllocated = useSelector(state => state.strategyRouter.userTotalAllocated || "0");
+    const userTotalAllocatedValue = useSelector(state => state.strategyRouter.userTotalAllocatedValue || "0");
 
     // Wrap in useMemo to prevent unnecessary re-renders
     const strategies = useMemo(() => strategiesRaw || [], [strategiesRaw]);
@@ -137,27 +139,54 @@ const Charts = () => {
                     try {
                         // Get state at that block using blockTag
                         const blockTag = eventData.blockNumber;
-                        const totalAssetsBN = await dBank.totalAssets({ blockTag });
-                        let totalAssets = parseFloat(ethers.utils.formatUnits(totalAssetsBN, 18));
-                        const totalSupplyBN = await dBank.totalSupply({ blockTag });
-                        let totalSupply = parseFloat(ethers.utils.formatUnits(totalSupplyBN, 18));
-                        
-                        // Calculate price per share
-                        const pricePerShare = totalSupply > 0 ? totalAssets / totalSupply : 1;
-                        
                         // Get user shares at this block (if account is connected)
                         let userSharesValue = 0;
+                        let effectivePps = 1;
                         if (account) {
                             try {
                                 const userSharesBN = await dBank.balanceOf(account, { blockTag });
                                 const userShares = parseFloat(ethers.utils.formatUnits(userSharesBN, 18));
-                                userSharesValue = userShares * pricePerShare;
+                                let allocatedPrincipalBN = ethers.BigNumber.from(0);
+                                let allocatedValueBN = ethers.BigNumber.from(0);
+
+                                if (strategyRouter && strategies.length > 0) {
+                                    for (const s of strategies) {
+                                        if (!s || !s.id) continue;
+                                        const allocBN = await strategyRouter.getUserStrategyAllocation(account, s.id, { blockTag });
+                                        if (allocBN.gt(0)) {
+                                            const [strategyAddr, , , strategyAllocatedBN] = await strategyRouter.getStrategy(s.id, { blockTag });
+                                            let allocationValueBN = allocBN;
+                                            if (strategyAddr && strategyAddr !== ethers.constants.AddressZero && strategyAllocatedBN.gt(0)) {
+                                                try {
+                                                    const strategy = new ethers.Contract(
+                                                        strategyAddr,
+                                                        ["function totalAssets() view returns (uint256)"],
+                                                        provider
+                                                    );
+                                                    const strategyTotalAssetsBN = await strategy.totalAssets({ blockTag });
+                                                    allocationValueBN = allocBN.mul(strategyTotalAssetsBN).div(strategyAllocatedBN);
+                                                } catch {
+                                                    allocationValueBN = allocBN;
+                                                }
+                                            }
+                                            allocatedPrincipalBN = allocatedPrincipalBN.add(allocBN);
+                                            allocatedValueBN = allocatedValueBN.add(allocationValueBN);
+                                        }
+                                    }
+                                }
+
+                                const unallocatedPrincipalBN = userSharesBN.gt(allocatedPrincipalBN)
+                                    ? userSharesBN.sub(allocatedPrincipalBN)
+                                    : ethers.BigNumber.from(0);
+                                const totalValueBN = allocatedValueBN.add(unallocatedPrincipalBN);
+                                userSharesValue = parseFloat(ethers.utils.formatUnits(totalValueBN, 18));
+                                effectivePps = userShares > 0 ? userSharesValue / userShares : 1;
                                 
                                 // Debug log for first few events to verify calculations
                                 if (eventData.blockNumber <= 10) {
                                     console.log(`[Charts] Block ${eventData.blockNumber}:`, {
                                         userShares: userShares.toFixed(4),
-                                        pricePerShare: pricePerShare.toFixed(6),
+                                        pricePerShare: effectivePps.toFixed(6),
                                         userSharesValue: userSharesValue.toFixed(2),
                                         eventType: eventData.type
                                     });
@@ -171,7 +200,7 @@ const Charts = () => {
                         // Avoid duplicates - check if we already have a point for this timestamp
                         const existingPricePoint = priceHistory.find(p => p.x === timestamp);
                         if (!existingPricePoint) {
-                            priceHistory.push({ x: timestamp, y: pricePerShare });
+                            priceHistory.push({ x: timestamp, y: effectivePps });
                         }
                         
                         // Add user shares value point
@@ -230,7 +259,7 @@ const Charts = () => {
         };
 
         loadHistoricalDataFromEvents();
-    }, [dBank, provider, account]);
+    }, [dBank, provider, account, strategyRouter, strategies]);
 
     // Load current data periodically
     useEffect(() => {
@@ -242,15 +271,6 @@ const Charts = () => {
                 const currentBlock = await provider.getBlock('latest');
                 setLastBlockTimestamp(currentBlock.timestamp * 1000);
                 
-                // Get current price per share
-                const totalAssetsBN = await dBank.totalAssets();
-                const totalAssets = parseFloat(ethers.utils.formatUnits(totalAssetsBN, 18));
-                const totalSupplyBN = await dBank.totalSupply();
-                const totalSupply = parseFloat(ethers.utils.formatUnits(totalSupplyBN, 18));
-                const currentPricePerShare = totalSupply > 0 ? totalAssets / totalSupply : 1;
-                
-                setPricePerShare(currentPricePerShare.toString());
-
                 if (strategyRouter && account) {
                     await loadUserStrategyAllocations(strategyRouter, account, dispatch);
                 }
@@ -266,6 +286,18 @@ const Charts = () => {
                         console.error("Error parsing user shares:", error);
                     }
                 }
+
+                const allocatedValue = parseFloat(userTotalAllocatedValue || "0");
+                const unallocatedValue = Math.max(
+                    currentUserShares - parseFloat(userTotalAllocated || "0"),
+                    0
+                );
+                const currentUserValue = allocatedValue + unallocatedValue;
+                const currentPricePerShare = currentUserShares > 0
+                    ? currentUserValue / currentUserShares
+                    : 1;
+
+                setPricePerShare(currentPricePerShare.toString());
 
                 // Add current point to history if it's different from last point
                 const currentTimestamp = currentBlock.timestamp * 1000;
@@ -285,7 +317,6 @@ const Charts = () => {
                     // Update user shares value if account is connected
                     let userSharesValueHistory = [...prev.userSharesValue];
                     if (account) {
-                        const currentUserValue = currentUserShares * currentPricePerShare;
                         const lastUserValuePoint = userSharesValueHistory[userSharesValueHistory.length - 1];
                         
                         // Only add if it's been at least 1 minute since last point or value changed significantly
@@ -313,11 +344,11 @@ const Charts = () => {
 
         loadChartData();
 
-        // Refresh data every 30 seconds
-        const interval = setInterval(loadChartData, 30000);
+        // Refresh data every 10 seconds for smoother UI updates
+        const interval = setInterval(loadChartData, 10000);
         return () => clearInterval(interval);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [dBank, provider, account]);
+    }, [dBank, provider, account, userTotalAllocated, userTotalAllocatedValue]);
 
     // Helper functions for localStorage
     const getHistoricalData = (key) => {
@@ -467,7 +498,7 @@ const Charts = () => {
             title: { text: 'Price per Share' }
         },
         title: {
-            text: 'Vault Price per Share Evolution',
+            text: 'Effective Price per Share Evolution',
             style: { color: '#f8f9fa', fontSize: '16px' }
         },
         colors: ['#0dcaf0'],
@@ -543,7 +574,7 @@ const Charts = () => {
 
     // Calculate current user shares value
     let currentUserSharesValue = 0;
-    if (account && pricePerShare) {
+    if (account) {
         try {
             let userShares = 0;
             if (userSharesOnChain) {
@@ -553,7 +584,9 @@ const Charts = () => {
             } else {
                 userShares = parseFloat(userSharesRaw || "0");
             }
-            currentUserSharesValue = userShares * parseFloat(pricePerShare);
+            const allocatedValue = parseFloat(userTotalAllocatedValue || "0");
+            const unallocatedValue = Math.max(userShares - parseFloat(userTotalAllocated || "0"), 0);
+            currentUserSharesValue = allocatedValue + unallocatedValue;
         } catch (error) {
             console.error("Error calculating user shares value:", error);
         }
@@ -667,7 +700,7 @@ const Charts = () => {
                                 />
                             ) : (
                                 <div>
-                                    <h5 style={{ color: '#f8f9fa', marginBottom: '20px' }}>Vault Price per Share Evolution</h5>
+                                    <h5 style={{ color: '#f8f9fa', marginBottom: '20px' }}>Effective Price per Share Evolution</h5>
                                     <p style={{ color: '#adb5bd', textAlign: 'center', padding: '50px' }}>
                                         Current: {parseFloat(pricePerShare).toFixed(4)}
                                         <br />
