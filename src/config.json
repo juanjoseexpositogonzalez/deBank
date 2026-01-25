@@ -32,5 +32,27 @@
     "mockS1": {
       "address": "0x50227f0402667742A0d0BC8F1613f116596ad3c0"
     }
+  },
+  "84532": {
+    "token": {
+      "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+    },
+    "dbank": {
+      "address": ""
+    },
+    "strategyRouter": {
+      "address": ""
+    },
+    "configManager": {
+      "address": ""
+    },
+    "mockS1": {
+      "address": ""
+    },
+    "x402": {
+      "facilitatorUrl": "http://localhost:4022",
+      "treasuryWallet": "",
+      "backendUrl": "http://localhost:4021"
+    }
   }
 }
