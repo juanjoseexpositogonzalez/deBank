@@ -9,4 +9,7 @@ typechain-types
 cache
 artifacts
 
+# React build output
+build/
+
 docs/
