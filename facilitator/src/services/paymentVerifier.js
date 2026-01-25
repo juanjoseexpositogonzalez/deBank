@@ -13,16 +13,18 @@ async function verifyPayment(paymentSignature, paymentRequest) {
   if (!provider) initialize();
 
   try {
+    // Validar entrada
+    if (!paymentSignature || typeof paymentSignature !== 'string') {
+      return { valid: false, error: 'Invalid payment signature format' };
+    }
+
+    if (!paymentRequest || typeof paymentRequest !== 'object') {
+      return { valid: false, error: 'Invalid payment request format' };
+    }
+
     // Parsear el PAYMENT-SIGNATURE header
     const signature = parsePaymentSignature(paymentSignature);
 
-    // Crear instancia del esquema EVM para verificación
-    const scheme = new ExactEvmScheme();
-
-    // Verificar la firma usando el esquema
-    // Nota: La implementación real dependerá de la API exacta de @x402/evm
-    // Por ahora, hacemos una verificación básica de estructura
-    
     // Verificar que el pago no haya expirado
     const now = Math.floor(Date.now() / 1000);
     if (paymentRequest.expiresAt && paymentRequest.expiresAt < now) {
@@ -31,27 +33,68 @@ async function verifyPayment(paymentSignature, paymentRequest) {
 
     // Verificar estructura básica del payment request
     if (!paymentRequest.accepts || !Array.isArray(paymentRequest.accepts) || paymentRequest.accepts.length === 0) {
-      return { valid: false, error: 'Invalid payment request structure' };
+      return { valid: false, error: 'Invalid payment request structure: missing accepts array' };
     }
 
     const accept = paymentRequest.accepts[0];
     
-    // Extraer información básica de la verificación
-    // En producción, esto usaría la API real de @x402/evm para verificar la firma
-    const expectedAmount = accept.amount || accept.price;
-    const expectedTo = accept.payTo;
+    // Validar que el accept tenga los campos requeridos
+    if (!accept.payTo || !ethers.utils.isAddress(accept.payTo)) {
+      return { valid: false, error: 'Invalid payTo address in payment request' };
+    }
 
-    // Por ahora, retornamos una estructura básica
-    // La verificación real de la firma se hará cuando tengamos acceso a la API completa
+    const expectedAmount = accept.amount || accept.price;
+    if (!expectedAmount) {
+      return { valid: false, error: 'Missing amount or price in payment request' };
+    }
+
+    const expectedTo = accept.payTo;
+    const expectedNetwork = accept.network || paymentRequest.network;
+
+    // Validar que la red coincida
+    if (expectedNetwork && expectedNetwork !== config.network) {
+      return { valid: false, error: `Network mismatch: expected ${config.network}, got ${expectedNetwork}` };
+    }
+
+    // Verificar estructura de la firma
+    if (!signature.r || !signature.s || signature.v === undefined) {
+      return { valid: false, error: 'Invalid signature format: missing r, s, or v' };
+    }
+
+    // Crear instancia del esquema EVM para verificación
+    // Nota: La verificación completa de la firma EIP-3009 se hará cuando @x402/evm esté disponible
+    // Por ahora validamos estructura básica
+    try {
+      const scheme = new ExactEvmScheme();
+      // En producción, aquí se llamaría a scheme.verify() con los parámetros correctos
+    } catch (schemeError) {
+      // Si el esquema no está disponible, continuamos con validación básica
+      console.warn('ExactEvmScheme not available, using basic validation:', schemeError.message);
+    }
+
+    // Extraer información de la autorización si está disponible
+    let fromAddress = '0x0000000000000000000000000000000000000000';
+    let nonce = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(`${Date.now()}-${Math.random()}`));
+
+    if (signature.authorization) {
+      if (signature.authorization.from && ethers.utils.isAddress(signature.authorization.from)) {
+        fromAddress = signature.authorization.from;
+      }
+      if (signature.authorization.nonce) {
+        nonce = signature.authorization.nonce;
+      }
+    }
+
     return {
       valid: true,
-      from: signature.authorization?.from || '0x0000000000000000000000000000000000000000',
+      from: fromAddress,
       to: expectedTo,
       amount: expectedAmount,
-      nonce: signature.authorization?.nonce || ethers.utils.keccak256(ethers.utils.toUtf8Bytes(Date.now().toString())),
+      nonce: nonce,
+      network: expectedNetwork || config.network,
     };
   } catch (error) {
-    return { valid: false, error: error.message };
+    return { valid: false, error: `Verification error: ${error.message}` };
   }
 }
 
