@@ -11,6 +11,7 @@ import {
     depositViaX402,
     loadBalances,
 } from '../store/interactions';
+import { isX402Available } from '../utils/x402Config';
 
 import { useSelector, useDispatch } from 'react-redux';
 import { useState } from 'react';
@@ -64,8 +65,8 @@ const Deposit = () => {
     };
     const explorerBaseUrl = explorerMap[chainId] || '';
     
-    // Verificar si x402 está disponible (solo Base Sepolia)
-    const isX402Available = chainId === 84532 || chainId === '84532';
+    // Verificar si x402 está disponible
+    const x402Available = isX402Available(chainId);
 
     const amountHandler = async (e) => {
         const value = e.target.value;
@@ -160,7 +161,7 @@ const Deposit = () => {
         setShowAlert(false);
 
         // Si usa x402, usar flujo x402
-        if (useX402 && isX402Available) {
+        if (useX402 && x402Available) {
             setX402Loading(true);
             try {
                 const result = await depositViaX402(provider, account, usdcAmount, dispatch, chainId);
@@ -270,7 +271,7 @@ const Deposit = () => {
                         </InputGroup>
                     </Row>
 
-                    {isX402Available && (
+                    {x402Available && (
                         <Row className='my-3'>
                             <Form.Check
                                 type="switch"
