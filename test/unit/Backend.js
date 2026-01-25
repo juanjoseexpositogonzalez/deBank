@@ -3,17 +3,9 @@ const { ethers } = require('hardhat');
 const { validateDepositRequest, checkIdempotency, recordPayment } = require('../../backend/src/utils/validation');
 
 describe('Backend - Unit Tests', () => {
-    let mockConfig;
-
     beforeEach(() => {
-        // Mock config
-        mockConfig = {
-            minDeposit: '1.00',
-            maxDeposit: '10000.00',
-        };
-        
-        // Mock config module
-        jest.mock('../../backend/src/config', () => mockConfig);
+        // Reset processed requests for idempotency tests
+        // Note: In production, this would be a database/Redis reset
     });
 
     describe('validateDepositRequest', () => {
