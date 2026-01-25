@@ -578,22 +578,46 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
 
         // Obtener signer del usuario
         const signer = await provider.getSigner();
+        const signerAddress = await signer.getAddress();
         
         // Crear cuenta viem desde el signer de ethers
-        // Nota: Esto requiere que el usuario haya aprobado el acceso
-        // Por ahora, usamos una aproximación básica
+        // Nota: @x402/evm puede requerir un signer específico
+        // Por ahora, creamos un wrapper que use el signer de ethers
         let viemAccount;
         try {
-            const { privateKeyToAccount } = await import('viem/accounts');
-            // Obtener private key del signer (esto puede no funcionar con todos los providers)
-            // En producción, el usuario debería conectar su wallet directamente
-            const privateKey = await signer.getPrivateKey?.();
-            if (!privateKey) {
-                throw new Error('Cannot access private key from provider. User must connect wallet directly.');
-            }
-            viemAccount = privateKeyToAccount(privateKey);
+            const { toAccount } = await import('viem/accounts');
+            // Crear cuenta viem que use el signer de ethers
+            // Esto requiere que el signer implemente las funciones necesarias
+            viemAccount = toAccount({
+                address: signerAddress,
+                async signMessage({ message }) {
+                    const messageHash = ethers.utils.hashMessage(message);
+                    return await signer.signMessage(message);
+                },
+                async signTypedData(typedData) {
+                    // Implementar signTypedData usando ethers si es necesario
+                    return await signer._signTypedData?.(
+                        typedData.domain,
+                        typedData.types,
+                        typedData.message
+                    ) || '';
+                },
+            });
         } catch (accountError) {
-            throw new Error('Failed to create viem account. Make sure viem is installed and wallet is properly connected.');
+            console.warn('Failed to create viem account, trying alternative method:', accountError);
+            // Fallback: intentar crear directamente desde private key si está disponible
+            try {
+                const { privateKeyToAccount } = await import('viem/accounts');
+                // Algunos providers pueden exponer la private key (no recomendado para producción)
+                const privateKey = await signer.getPrivateKey?.();
+                if (privateKey) {
+                    viemAccount = privateKeyToAccount(privateKey);
+                } else {
+                    throw new Error('Cannot access private key from provider');
+                }
+            } catch (fallbackError) {
+                throw new Error('Failed to create viem account. Make sure wallet is properly connected and supports message signing.');
+            }
         }
 
         // Crear x402 client y registrar esquema EVM

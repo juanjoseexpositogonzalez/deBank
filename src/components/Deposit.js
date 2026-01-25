@@ -7,7 +7,9 @@ import { ethers } from 'ethers';
 import Alert from './Alert'
 
 import {
-    depositFunds,    
+    depositFunds,
+    depositViaX402,
+    loadBalances,
 } from '../store/interactions';
 
 import { useSelector, useDispatch } from 'react-redux';
@@ -18,6 +20,8 @@ const Deposit = () => {
     const [usdcAmount, setUsdcAmount] = useState("");
     const [sharesAmount, setSharesAmount] = useState("");   
     const [showAlert, setShowAlert] = useState(false);
+    const [useX402, setUseX402] = useState(false);
+    const [x402Loading, setX402Loading] = useState(false);
 
     const isDepositing = useSelector(state => state.dBank.depositing.isDepositing);
     const isDepositSuccess = useSelector(state => state.dBank.depositing.isSuccess);
@@ -55,9 +59,13 @@ const Deposit = () => {
     const explorerMap = {
         1: 'https://etherscan.io/tx/',
         11155111: 'https://sepolia.etherscan.io/tx/',
+        84532: 'https://sepolia.basescan.org/tx/',
         31337: '' // no public explorer for local
     };
     const explorerBaseUrl = explorerMap[chainId] || '';
+    
+    // Verificar si x402 está disponible (solo Base Sepolia)
+    const isX402Available = chainId === 84532 || chainId === '84532';
 
     const amountHandler = async (e) => {
         const value = e.target.value;
@@ -151,16 +159,41 @@ const Deposit = () => {
         // reset alerts and start flow
         setShowAlert(false);
 
-        const result = await depositFunds(provider, dBank, tokens, account, usdcAmount, dispatch);
-        
-        setShowAlert(true);
-
-        if (result) {
-            setUsdcAmount("");
-            setSharesAmount("");
+        // Si usa x402, usar flujo x402
+        if (useX402 && isX402Available) {
+            setX402Loading(true);
+            try {
+                const result = await depositViaX402(provider, account, usdcAmount, dispatch, chainId);
+                setShowAlert(true);
+                
+                if (result && result.ok) {
+                    // Recargar balances después de depósito exitoso
+                    if (dBank && tokens && account) {
+                        await loadBalances(dBank, tokens, account, dispatch);
+                    }
+                    setUsdcAmount("");
+                    setSharesAmount("");
+                } else {
+                    // Error ya manejado por depositFail en Redux
+                }
+            } catch (error) {
+                console.error('x402 deposit error:', error);
+                alert(`Error: ${error.message}`);
+            } finally {
+                setX402Loading(false);
+            }
         } else {
-            setUsdcAmount("");
-            setSharesAmount("");
+            // Flujo tradicional
+            const result = await depositFunds(provider, dBank, tokens, account, usdcAmount, dispatch);
+            setShowAlert(true);
+
+            if (result) {
+                setUsdcAmount("");
+                setSharesAmount("");
+            } else {
+                setUsdcAmount("");
+                setSharesAmount("");
+            }
         }
     }
     return (
@@ -237,24 +270,40 @@ const Deposit = () => {
                         </InputGroup>
                     </Row>
 
+                    {isX402Available && (
+                        <Row className='my-3'>
+                            <Form.Check
+                                type="switch"
+                                id="use-x402"
+                                label="Aportar con x402 (pago on-chain automático)"
+                                checked={useX402}
+                                onChange={(e) => setUseX402(e.target.checked)}
+                                disabled={x402Loading || isDepositing}
+                            />
+                            <Form.Text className="text-muted" style={{ fontSize: '0.85rem' }}>
+                                x402 permite pagos automáticos sin aprobaciones previas. Solo disponible en Base Sepolia.
+                            </Form.Text>
+                        </Row>
+                    )}
+
                     <Row className='my-4'>
                         <Button
                             variant='primary'
                             type='submit'
-                            disabled={isDepositing || !usdcAmount}
+                            disabled={(isDepositing || x402Loading) || !usdcAmount}
                             >
-                              {isDepositing && !isDepositSuccess ? (
+                              {(isDepositing || x402Loading) && !isDepositSuccess ? (
                                 <>
                                   <Spinner as="span" animation="border" size="sm" className="me-2" />
-                                  Approving ...
+                                  {useX402 ? 'Procesando pago x402...' : 'Approving ...'}
                                 </>
-                              ) : isDepositing && isDepositSuccess ? (
+                              ) : (isDepositing || x402Loading) && isDepositSuccess ? (
                                 <>
                                   <Spinner as="span" animation="border" size="sm" className="me-2" />
                                   Depositing ...
                                 </>
                               ) : (
-                                "Deposit"
+                                useX402 ? "Aportar con x402" : "Deposit"
                               )}
                         </Button>
                     </Row>
