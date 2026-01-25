@@ -53,11 +53,27 @@ async function deposit({ amount, receiver }) {
   }
 
   try {
+    // Validar inputs
+    if (!amount || amount.isZero()) {
+      throw new Error('Invalid amount: must be greater than zero');
+    }
+
+    if (!receiver || !ethers.utils.isAddress(receiver)) {
+      throw new Error('Invalid receiver address');
+    }
+
+    // Verificar que el contrato dBank esté desplegado
+    const code = await provider.getCode(config.dBankAddress);
+    if (!code || code === '0x') {
+      throw new Error('dBank contract not deployed at specified address');
+    }
+
     // Aprobar tokens si es necesario
     const tokenAddress = await dBankContract.asset();
     const tokenABI = [
       'function approve(address spender, uint256 amount) returns (bool)',
       'function allowance(address owner, address spender) view returns (uint256)',
+      'function balanceOf(address account) view returns (uint256)',
     ];
     const tokenContract = new ethers.Contract(
       tokenAddress,
@@ -65,15 +81,30 @@ async function deposit({ amount, receiver }) {
       treasurySigner
     );
     
+    // Verificar balance del treasury wallet
+    const treasuryBalance = await tokenContract.balanceOf(treasurySigner.address);
+    if (treasuryBalance.lt(amount)) {
+      throw new Error(`Insufficient balance: treasury has ${ethers.utils.formatUnits(treasuryBalance, 18)}, needs ${ethers.utils.formatUnits(amount, 18)}`);
+    }
+    
     const allowance = await tokenContract.allowance(
       treasurySigner.address,
       config.dBankAddress
     );
     
     if (allowance.lt(amount)) {
-      const approveTx = await tokenContract.approve(config.dBankAddress, amount);
+      // Aprobar con un margen adicional para evitar múltiples aprobaciones
+      const approveAmount = amount.mul(2);
+      const approveTx = await tokenContract.approve(config.dBankAddress, approveAmount);
       await approveTx.wait();
     }
+
+    // Obtener balance de shares antes del depósito
+    const dBankERC20ABI = [
+      'function balanceOf(address account) view returns (uint256)',
+    ];
+    const dBankERC20 = new ethers.Contract(config.dBankAddress, dBankERC20ABI, provider);
+    const sharesBefore = await dBankERC20.balanceOf(receiver);
 
     // Ejecutar depósito
     const tx = await dBankContract.deposit(amount, receiver);
@@ -87,21 +118,30 @@ async function deposit({ amount, receiver }) {
       shares = depositEvent.args.shares;
     } else {
       // Fallback: calcular shares desde el balance del receiver
-      const dBankERC20ABI = [
-        'function balanceOf(address account) view returns (uint256)',
-      ];
-      const dBankERC20 = new ethers.Contract(config.dBankAddress, dBankERC20ABI, provider);
-      const balanceBefore = await dBankERC20.balanceOf(receiver, { blockNumber: receipt.blockNumber - 1 });
-      const balanceAfter = await dBankERC20.balanceOf(receiver, { blockNumber: receipt.blockNumber });
-      shares = balanceAfter.sub(balanceBefore);
+      const sharesAfter = await dBankERC20.balanceOf(receiver);
+      shares = sharesAfter.sub(sharesBefore);
+      
+      if (shares.isZero()) {
+        throw new Error('No shares were minted - deposit may have failed');
+      }
     }
 
     return {
       txHash: receipt.transactionHash,
       shares: ethers.utils.formatUnits(shares, 18),
+      blockNumber: receipt.blockNumber,
     };
   } catch (error) {
-    throw new Error(`Deposit failed: ${error.message}`);
+    // Mejorar mensajes de error
+    if (error.code === 'INSUFFICIENT_FUNDS') {
+      throw new Error('Insufficient funds in treasury wallet');
+    } else if (error.code === 'UNPREDICTABLE_GAS_LIMIT') {
+      throw new Error('Transaction would fail - check contract state');
+    } else if (error.reason) {
+      throw new Error(`Deposit failed: ${error.reason}`);
+    } else {
+      throw new Error(`Deposit failed: ${error.message}`);
+    }
   }
 }
 
