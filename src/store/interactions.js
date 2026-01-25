@@ -548,6 +548,121 @@ export const depositFunds = async (provider, dBank, tokens, account, usdcAmount,
 }
 
 // ----------------------------------------------------------
+// DEPOSIT VIA X402
+export const depositViaX402 = async (provider, account, amount, dispatch, chainId) => {
+    try {
+        dispatch(depositRequest());
+
+        // Verificar que estamos en Base Sepolia (84532)
+        if (chainId !== 84532 && chainId !== '84532') {
+            throw new Error('x402 deposits are only available on Base Sepolia (chainId: 84532)');
+        }
+
+        // Obtener configuración x402 desde config.json
+        const x402Config = config[chainId]?.x402;
+        if (!x402Config || !x402Config.backendUrl) {
+            throw new Error('x402 backend URL not configured for this network');
+        }
+
+        // Importar cliente x402 dinámicamente (puede no estar disponible aún)
+        let x402Client, wrapFetchWithPayment, registerExactEvmScheme;
+        try {
+            const x402Fetch = await import('@x402/fetch');
+            const x402Evm = await import('@x402/evm/exact/client');
+            x402Client = x402Fetch.x402Client;
+            wrapFetchWithPayment = x402Fetch.wrapFetchWithPayment;
+            registerExactEvmScheme = x402Evm.registerExactEvmScheme;
+        } catch (importError) {
+            throw new Error('x402 packages not installed. Run: npm install @x402/fetch @x402/evm viem');
+        }
+
+        // Obtener signer del usuario
+        const signer = await provider.getSigner();
+        
+        // Crear cuenta viem desde el signer de ethers
+        // Nota: Esto requiere que el usuario haya aprobado el acceso
+        // Por ahora, usamos una aproximación básica
+        let viemAccount;
+        try {
+            const { privateKeyToAccount } = await import('viem/accounts');
+            // Obtener private key del signer (esto puede no funcionar con todos los providers)
+            // En producción, el usuario debería conectar su wallet directamente
+            const privateKey = await signer.getPrivateKey?.();
+            if (!privateKey) {
+                throw new Error('Cannot access private key from provider. User must connect wallet directly.');
+            }
+            viemAccount = privateKeyToAccount(privateKey);
+        } catch (accountError) {
+            throw new Error('Failed to create viem account. Make sure viem is installed and wallet is properly connected.');
+        }
+
+        // Crear x402 client y registrar esquema EVM
+        const client = new x402Client();
+        registerExactEvmScheme(client, {
+            signer: viemAccount,
+        });
+
+        // Wrap fetch con manejo de pagos
+        const fetchWithPayment = wrapFetchWithPayment(fetch, client);
+
+        // Generar requestId único para idempotencia
+        const requestId = `deposit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+        // Hacer request al backend x402
+        const backendUrl = x402Config.backendUrl;
+        const response = await fetchWithPayment(`${backendUrl}/api/x402/deposit`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                amount: amount.toString(),
+                userAddress: account,
+                requestId,
+            }),
+        });
+
+        if (!response.ok) {
+            // Si es 402, el cliente x402 debería haber manejado el pago automáticamente
+            // Si aún falla, puede ser un error del servidor
+            const errorText = await response.text();
+            let errorData;
+            try {
+                errorData = JSON.parse(errorText);
+            } catch {
+                errorData = { error: errorText };
+            }
+            throw new Error(errorData.error || `Deposit failed: ${response.status} ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Deposit failed');
+        }
+
+        // Dispatch success action
+        dispatch(depositSuccess(result.txHash));
+        
+        // Recargar balances (necesitamos dBank y tokens del store)
+        // Esto se hará desde el componente después de recibir la respuesta
+
+        return { 
+            ok: true, 
+            txHash: result.txHash, 
+            shares: result.shares 
+        };
+    } catch (error) {
+        console.error('depositViaX402 error:', error);
+        dispatch(depositFail(error.message));
+        return { 
+            ok: false, 
+            error: error.message 
+        };
+    }
+};
+
+// ----------------------------------------------------------
 // WITHDRAW FUNDS
 export const withdrawFunds = async (provider, dBank, tokens, account, usdcAmount, dispatch) => {
     try {
