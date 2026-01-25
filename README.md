@@ -108,6 +108,40 @@ npm run start
 ## 💧 Nota sobre un-allocate
 - El `un-allocate` requiere liquidez en el `StrategyRouter`. Si el rendimiento es virtual (MockS1), el router debe tener balance suficiente para devolver la parte de yield.
 
+## 💳 Integración x402 (En desarrollo)
+
+dBank soporta aportes vía protocolo x402 de Coinbase para pagos on-chain automáticos.
+
+### Componentes
+
+- **Facilitador** (`facilitator/`): Servicio propio para verificación y liquidación de pagos
+- **Backend x402** (`backend/`): API protegida por x402 para depósitos
+- **Red**: Base Sepolia (84532) con USDC EIP-3009
+
+### Documentación
+
+- `docs/X402_OVERVIEW.md`: Introducción al protocolo x402
+- `docs/X402_ARCHITECTURE.md`: Arquitectura y flujo del sistema
+- `facilitator/README.md`: Guía del facilitador
+- `backend/README.md`: Guía del backend
+
+### Estado
+
+✅ Configuración Base Sepolia  
+✅ Facilitador propio implementado  
+✅ Backend x402 implementado  
+⏳ Frontend integration (pendiente)  
+⏳ Tests de integración (pendiente)
+
+### Próximos pasos
+
+1. Instalar dependencias: `npm install` en `facilitator/` y `backend/`
+2. Configurar variables de entorno (ver `.env.example` en cada directorio)
+3. Desplegar contratos en Base Sepolia
+4. Iniciar facilitador: `cd facilitator && npm start`
+5. Iniciar backend: `cd backend && npm start`
+6. Integrar frontend con cliente x402
+
 ## 🧭 Seeding y configuración de redes
 - Direcciones por red en `src/config.json` (31337 Hardhat, 11155111 Sepolia).
 - El script `scripts/seed.js` toma direcciones de `config.json` (o variables de entorno con las mismas keys `token`, `dbank`, `strategyRouter`, `configManager`, `mockS1`).
