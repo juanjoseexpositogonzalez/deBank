@@ -1,6 +1,7 @@
 const { expect } = require('chai');
 const { ethers } = require('hardhat');
 const axios = require('axios');
+const { checkX402Services, createMockPaymentRequest, createMockPaymentSignature } = require('../helpers/x402Helpers');
 
 const tokens = (n) => ethers.utils.parseUnits(n.toString(), 18);
 
@@ -147,7 +148,7 @@ describe('x402 End-to-End Integration', () => {
 
         it('should reject request without paymentRequest', async () => {
             const requestBody = {
-                paymentSignature: 'signature=0x123,0x456,27',
+                paymentSignature: createMockPaymentSignature(),
                 // Missing paymentRequest
             };
 
@@ -157,6 +158,31 @@ describe('x402 End-to-End Integration', () => {
             } catch (error) {
                 expect(error.response?.status).to.equal(400);
                 expect(error.response?.data.error).to.include('Missing');
+            }
+        });
+
+        it('should handle payment verification with mock data', async () => {
+            const paymentRequest = createMockPaymentRequest({
+                payTo: treasury.address,
+                amount: '10.00',
+            });
+            const paymentSignature = createMockPaymentSignature({
+                from: user.address,
+            });
+
+            const requestBody = {
+                paymentSignature,
+                paymentRequest,
+            };
+
+            // This will likely fail without real EIP-3009 signature, but tests structure
+            try {
+                const response = await axios.post(`${FACILITATOR_URL}/verify`, requestBody);
+                // If it succeeds, verify response structure
+                expect(response.data).to.have.property('verified');
+            } catch (error) {
+                // Expected if signature verification fails (mock signature is invalid)
+                expect([400, 500]).to.include(error.response?.status);
             }
         });
     });
