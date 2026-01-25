@@ -1,11 +1,17 @@
 const { expect } = require('chai');
 const { ethers } = require('hardhat');
+
+// Mock config before requiring validation
+process.env.MIN_DEPOSIT_USD = '1.00';
+process.env.MAX_DEPOSIT_USD = '10000.00';
+
 const { validateDepositRequest, checkIdempotency, recordPayment } = require('../../backend/src/utils/validation');
 
 describe('Backend - Unit Tests', () => {
     beforeEach(() => {
         // Reset processed requests for idempotency tests
-        // Note: In production, this would be a database/Redis reset
+        // Note: The validation module uses an in-memory Map, so we need to clear it
+        // Since we can't directly access the Map, we'll use unique requestIds for each test
     });
 
     describe('validateDepositRequest', () => {

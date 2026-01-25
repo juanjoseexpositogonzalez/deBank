@@ -1,5 +1,13 @@
 const { expect } = require('chai');
 const { ethers } = require('hardhat');
+const path = require('path');
+const fs = require('fs');
+
+// Mock database path to use in-memory database for tests
+// This must be set before requiring config
+const originalEnv = process.env.DATABASE_PATH;
+process.env.DATABASE_PATH = ':memory:';
+
 const { parsePaymentSignature } = require('../../facilitator/src/utils/eip3009');
 const { checkPaymentExists, recordPayment, initialize } = require('../../facilitator/src/utils/database');
 const { verifyPayment } = require('../../facilitator/src/services/paymentVerifier');
@@ -13,7 +21,7 @@ describe('Facilitator - Unit Tests', () => {
         // Setup provider
         provider = ethers.provider;
         
-        // Initialize database
+        // Initialize database (will use in-memory database)
         initialize();
         
         // Mock payment request
@@ -100,6 +108,15 @@ describe('Facilitator - Unit Tests', () => {
             expect(duplicate).to.not.be.null;
             expect(duplicate.id).to.equal(paymentId);
         });
+    });
+
+    afterEach(() => {
+        // Clean up: reset database path if needed
+        if (originalEnv !== undefined) {
+            process.env.DATABASE_PATH = originalEnv;
+        } else {
+            delete process.env.DATABASE_PATH;
+        }
     });
 
     describe('verifyPayment', () => {
