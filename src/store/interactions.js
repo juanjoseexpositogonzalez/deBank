@@ -554,14 +554,15 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
         dispatch(depositRequest());
 
         // Verificar que estamos en Base Sepolia (84532)
-        if (chainId !== 84532 && chainId !== '84532') {
-            throw new Error('x402 deposits are only available on Base Sepolia (chainId: 84532)');
+        const chainIdNum = typeof chainId === 'string' ? parseInt(chainId) : chainId;
+        if (chainIdNum !== 84532) {
+            throw new Error('x402 deposits are only available on Base Sepolia (chainId: 84532). Please switch networks.');
         }
 
         // Obtener configuración x402 desde config.json
-        const x402Config = config[chainId]?.x402;
+        const x402Config = config[chainId]?.x402 || config[chainIdNum.toString()]?.x402;
         if (!x402Config || !x402Config.backendUrl) {
-            throw new Error('x402 backend URL not configured for this network');
+            throw new Error('x402 backend URL not configured for this network. Please check config.json');
         }
 
         // Importar cliente x402 dinámicamente (puede no estar disponible aún)
@@ -573,6 +574,7 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
             wrapFetchWithPayment = x402Fetch.wrapFetchWithPayment;
             registerExactEvmScheme = x402Evm.registerExactEvmScheme;
         } catch (importError) {
+            console.error('x402 import error:', importError);
             throw new Error('x402 packages not installed. Run: npm install @x402/fetch @x402/evm viem');
         }
 
@@ -581,43 +583,48 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
         const signerAddress = await signer.getAddress();
         
         // Crear cuenta viem desde el signer de ethers
-        // Nota: @x402/evm puede requerir un signer específico
-        // Por ahora, creamos un wrapper que use el signer de ethers
+        // @x402/evm requiere un signer compatible con viem
         let viemAccount;
         try {
-            const { toAccount } = await import('viem/accounts');
-            // Crear cuenta viem que use el signer de ethers
-            // Esto requiere que el signer implemente las funciones necesarias
-            viemAccount = toAccount({
-                address: signerAddress,
-                async signMessage({ message }) {
-                    const messageHash = ethers.utils.hashMessage(message);
-                    return await signer.signMessage(message);
-                },
-                async signTypedData(typedData) {
-                    // Implementar signTypedData usando ethers si es necesario
-                    return await signer._signTypedData?.(
-                        typedData.domain,
-                        typedData.types,
-                        typedData.message
-                    ) || '';
-                },
-            });
-        } catch (accountError) {
-            console.warn('Failed to create viem account, trying alternative method:', accountError);
-            // Fallback: intentar crear directamente desde private key si está disponible
-            try {
-                const { privateKeyToAccount } = await import('viem/accounts');
-                // Algunos providers pueden exponer la private key (no recomendado para producción)
-                const privateKey = await signer.getPrivateKey?.();
-                if (privateKey) {
-                    viemAccount = privateKeyToAccount(privateKey);
-                } else {
-                    throw new Error('Cannot access private key from provider');
+            const { privateKeyToAccount } = await import('viem/accounts');
+            
+            // Intentar obtener private key del signer
+            // Nota: Esto solo funciona con algunos tipos de providers (ej: JsonRpcProvider con private key)
+            // Para MetaMask y otros wallets, el usuario debe firmar manualmente
+            let privateKey;
+            
+            // Método 1: Si el signer tiene getPrivateKey
+            if (signer.getPrivateKey) {
+                try {
+                    privateKey = await signer.getPrivateKey();
+                } catch (e) {
+                    console.warn('getPrivateKey not available:', e.message);
                 }
-            } catch (fallbackError) {
-                throw new Error('Failed to create viem account. Make sure wallet is properly connected and supports message signing.');
             }
+            
+            // Método 2: Si el provider tiene acceso a la private key
+            if (!privateKey && provider.connection && provider.connection.url) {
+                // Para desarrollo local con Hardhat, la private key puede estar en el provider
+                // Esto es solo para testing
+            }
+            
+            if (!privateKey) {
+                // Para producción con MetaMask u otros wallets, necesitamos usar un enfoque diferente
+                // Por ahora, lanzamos un error informativo
+                throw new Error(
+                    'x402 requires direct wallet access. ' +
+                    'Please ensure your wallet is connected and supports EIP-3009 signing. ' +
+                    'For development, use a local Hardhat account.'
+                );
+            }
+            
+            viemAccount = privateKeyToAccount(privateKey);
+        } catch (accountError) {
+            console.error('Failed to create viem account:', accountError);
+            throw new Error(
+                `Failed to create x402 signer: ${accountError.message}. ` +
+                'Make sure your wallet supports EIP-3009 signing or use a development account.'
+            );
         }
 
         // Crear x402 client y registrar esquema EVM
@@ -634,6 +641,8 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
 
         // Hacer request al backend x402
         const backendUrl = x402Config.backendUrl;
+        console.log('Making x402 deposit request to:', backendUrl);
+        
         const response = await fetchWithPayment(`${backendUrl}/api/x402/deposit`, {
             method: 'POST',
             headers: {
@@ -656,6 +665,12 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
             } catch {
                 errorData = { error: errorText };
             }
+            
+            // Si es 402, el cliente debería haber manejado el pago
+            if (response.status === 402) {
+                throw new Error('Payment required but x402 client failed to process payment. Please check your wallet connection.');
+            }
+            
             throw new Error(errorData.error || `Deposit failed: ${response.status} ${response.statusText}`);
         }
 
@@ -668,8 +683,7 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
         // Dispatch success action
         dispatch(depositSuccess(result.txHash));
         
-        // Recargar balances (necesitamos dBank y tokens del store)
-        // Esto se hará desde el componente después de recibir la respuesta
+        console.log('x402 deposit successful:', result);
 
         return { 
             ok: true, 
