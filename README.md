@@ -130,17 +130,27 @@ dBank soporta aportes vía protocolo x402 de Coinbase para pagos on-chain autom�
 ✅ Configuración Base Sepolia  
 ✅ Facilitador propio implementado  
 ✅ Backend x402 implementado  
-⏳ Frontend integration (pendiente)  
-⏳ Tests de integración (pendiente)
+✅ Frontend integration completa  
+✅ Tests unitarios y de integración implementados  
 
-### Próximos pasos
+### Documentación de Testing
 
-1. Instalar dependencias: `npm install` en `facilitator/` y `backend/`
+- `docs/X402_TESTING_GUIDE.md`: Guía completa para probar x402 en la DApp
+- `test/README_X402.md`: Documentación de tests x402
+- `test/unit/Facilitator.js`: Tests unitarios del facilitador
+- `test/unit/Backend.js`: Tests unitarios del backend
+- `test/integration/X402Flow.js`: Tests de integración del flujo x402
+- `test/integration/X402EndToEnd.js`: Tests end-to-end (requiere servicios corriendo)
+
+### Próximos pasos para probar
+
+1. Instalar dependencias: `npm install` en raíz, `facilitator/` y `backend/`
 2. Configurar variables de entorno (ver `.env.example` en cada directorio)
-3. Desplegar contratos en Base Sepolia
-4. Iniciar facilitador: `cd facilitator && npm start`
-5. Iniciar backend: `cd backend && npm start`
-6. Integrar frontend con cliente x402
+3. Desplegar contratos en Base Sepolia: `npx hardhat run scripts/deploy.js --network baseSepolia`
+4. Iniciar servicios: `./scripts/start-x402.sh` (o manualmente)
+5. Conectar wallet a Base Sepolia y probar depósito x402 desde la DApp
+
+Ver `docs/X402_TESTING_GUIDE.md` para instrucciones detalladas.
 
 ## 🧭 Seeding y configuración de redes
 - Direcciones por red en `src/config.json` (31337 Hardhat, 11155111 Sepolia).
