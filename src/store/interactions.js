@@ -559,10 +559,10 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
             throw new Error('x402 deposits are only available on Base Sepolia (chainId: 84532). Please switch networks.');
         }
 
-        // Obtener configuración x402 desde config.json
-        const x402Config = config[chainId]?.x402 || config[chainIdNum.toString()]?.x402;
-        if (!x402Config || !x402Config.backendUrl) {
-            throw new Error('x402 backend URL not configured for this network. Please check config.json');
+        // Obtener configuración x402 usando helper
+        const backendUrl = getX402BackendUrl(chainId);
+        if (!backendUrl) {
+            throw new Error('x402 backend URL not configured for this network. Please check config.json and ensure x402.backendUrl is set for Base Sepolia.');
         }
 
         // Importar cliente x402 dinámicamente (puede no estar disponible aún)
@@ -640,7 +640,6 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
         const requestId = `deposit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
         // Hacer request al backend x402
-        const backendUrl = x402Config.backendUrl;
         console.log('Making x402 deposit request to:', backendUrl);
         
         const response = await fetchWithPayment(`${backendUrl}/api/x402/deposit`, {

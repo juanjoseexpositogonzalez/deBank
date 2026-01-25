@@ -271,7 +271,7 @@ const Deposit = () => {
                         </InputGroup>
                     </Row>
 
-                    {x402Available && (
+                    {x402Available ? (
                         <Row className='my-3'>
                             <Form.Check
                                 type="switch"
@@ -285,7 +285,13 @@ const Deposit = () => {
                                 x402 permite pagos automáticos sin aprobaciones previas. Solo disponible en Base Sepolia.
                             </Form.Text>
                         </Row>
-                    )}
+                    ) : (chainId === 84532 || chainId === '84532') ? (
+                        <Row className='my-3'>
+                            <Form.Text className="text-warning" style={{ fontSize: '0.85rem' }}>
+                                ⚠️ x402 está disponible en Base Sepolia pero no está configurado. Verifica config.json.
+                            </Form.Text>
+                        </Row>
+                    ) : null}
 
                     <Row className='my-4'>
                         <Button
