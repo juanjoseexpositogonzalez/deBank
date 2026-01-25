@@ -57,6 +57,13 @@ const Navigation = () => {
               rpcUrls: ['https://rpc.sepolia.org'],
               nativeCurrency: { name: 'SepoliaETH', symbol: 'ETH', decimals: 18 },
               blockExplorerUrls: ['https://sepolia.etherscan.io']
+            },
+            '0x14a34': {
+              chainId: '0x14a34',
+              chainName: 'Base Sepolia',
+              rpcUrls: ['https://sepolia.base.org'],
+              nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+              blockExplorerUrls: ['https://sepolia.basescan.org']
             }
           };
 
@@ -100,7 +107,8 @@ const Navigation = () => {
           >
             <option value="0" disabled>Select Network</option>
             <option value="0x7a69">Hardhat Local</option>            
-            <option value="0xaa36a7">Sepolia</option>    
+            <option value="0xaa36a7">Sepolia</option>
+            <option value="0x14a34">Base Sepolia</option>    
           </Form.Select>  
       
           {account ? (

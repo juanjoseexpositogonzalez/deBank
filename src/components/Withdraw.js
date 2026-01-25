@@ -39,6 +39,7 @@ const Withdraw = () => {
     const explorerMap = {
         1: 'https://etherscan.io/tx/',
         11155111: 'https://sepolia.etherscan.io/tx/',
+        84532: 'https://sepolia.basescan.org/tx/',
         31337: ''
     };
     const explorerBaseUrl = explorerMap[chainId] || '';

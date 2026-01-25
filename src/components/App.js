@@ -73,7 +73,7 @@ function App() {
       } catch (error) {
         console.error('Error handling chain change:', error);
         const errorMessage = error.message || 'Unknown error occurred';
-        alert(`⚠️ Network Switch Error\n\n${errorMessage}\n\nPlease switch to a supported network (Hardhat Local or Sepolia).`);
+        alert(`⚠️ Network Switch Error\n\n${errorMessage}\n\nPlease switch to a supported network (Hardhat Local, Sepolia, or Base Sepolia).`);
       }
     };
 
@@ -147,7 +147,7 @@ function App() {
         console.error('Error loading blockchain data:', error);
         // Show user-friendly error message
         const errorMessage = error.message || 'Unknown error occurred';
-        alert(`⚠️ Network Configuration Error\n\n${errorMessage}\n\nTroubleshooting:\n1. Make sure Hardhat node is running: npx hardhat node\n2. Switch MetaMask to Hardhat Local network\n3. Ensure contracts are deployed to localhost`);
+        alert(`⚠️ Network Configuration Error\n\n${errorMessage}\n\nTroubleshooting:\n1. Make sure Hardhat node is running: npx hardhat node\n2. Switch MetaMask to a supported network (Hardhat Local, Sepolia, or Base Sepolia)\n3. Ensure contracts are deployed to the selected network`);
       }
     };
 
