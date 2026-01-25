@@ -83,6 +83,7 @@ import CONFIG_MANAGER_ABI_RAW from '../abis/ConfigManager.json'
 import MOCK_S1_ABI_RAW from '../abis/MockS1.json'
 
 import config from '../config.json'
+import { getX402BackendUrl } from '../utils/x402Config'
 
 // Normalize ABIs - handle both formats: direct array or Hardhat artifact with .abi property
 const normalizeABI = (abi) => {
@@ -580,7 +581,6 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
 
         // Obtener signer del usuario
         const signer = await provider.getSigner();
-        const signerAddress = await signer.getAddress();
         
         // Crear cuenta viem desde el signer de ethers
         // @x402/evm requiere un signer compatible con viem

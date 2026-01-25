@@ -90,72 +90,72 @@ npx hardhat run scripts/deploy.js --network localhost
 npx hardhat verify --network <network> <contract-address>
 
 # Seed data (balances/caps) using config.json addresses for the target chain
-npx hardhat run scripts/seed.js --network localhost   # o sepolia
+npx hardhat run scripts/seed.js --network localhost   # or sepolia
 ```
 
 ## 🌐 Frontend
 
 ```bash
 npm run start
-# Abre http://localhost:3000 y selecciona la red (Hardhat o Sepolia)
+# Opens http://localhost:3000 - select the network (Hardhat or Sepolia)
 ```
 
-## 🧩 ABIs y sincronización
-- Tras cambios en contratos, sincroniza los ABIs del frontend:
+## 🧩 ABIs and Synchronization
+- After contract changes, synchronize frontend ABIs:
   - `npm run sync-abis`
-- Si vas a usar el front con red local: `npm run frontend:start` (deploy + seed + start).
+- To use the frontend with local network: `npm run frontend:start` (deploy + seed + start).
 
-## 💧 Nota sobre un-allocate
-- El `un-allocate` requiere liquidez en el `StrategyRouter`. Si el rendimiento es virtual (MockS1), el router debe tener balance suficiente para devolver la parte de yield.
+## 💧 Note on un-allocate
+- `un-allocate` requires liquidity in `StrategyRouter`. If yield is virtual (MockS1), the router must have sufficient balance to return the yield portion.
 
-## 💳 Integración x402 (En desarrollo)
+## 💳 x402 Integration
 
-dBank soporta aportes vía protocolo x402 de Coinbase para pagos on-chain automáticos.
+dBank supports deposits via Coinbase's x402 protocol for automatic on-chain payments.
 
-### Componentes
+### Components
 
-- **Facilitador** (`facilitator/`): Servicio propio para verificación y liquidación de pagos
-- **Backend x402** (`backend/`): API protegida por x402 para depósitos
-- **Red**: Base Sepolia (84532) con USDC EIP-3009
+- **Facilitator** (`facilitator/`): Self-hosted service for payment verification and settlement
+- **x402 Backend** (`backend/`): x402-protected API for deposits
+- **Network**: Base Sepolia (84532) with EIP-3009 USDC
 
-### Documentación
+### Documentation
 
-- `docs/X402_OVERVIEW.md`: Introducción al protocolo x402
-- `docs/X402_ARCHITECTURE.md`: Arquitectura y flujo del sistema
-- `facilitator/README.md`: Guía del facilitador
-- `backend/README.md`: Guía del backend
+- `docs/X402_OVERVIEW.md`: Introduction to x402 protocol
+- `docs/X402_ARCHITECTURE.md`: Architecture and system flow
+- `facilitator/README.md`: Facilitator guide
+- `backend/README.md`: Backend guide
 
-### Estado
+### Status
 
-✅ Configuración Base Sepolia  
-✅ Facilitador propio implementado  
-✅ Backend x402 implementado  
-✅ Frontend integration completa  
-✅ Tests unitarios y de integración implementados  
+✅ Base Sepolia configuration  
+✅ Self-hosted facilitator implemented  
+✅ x402 backend implemented  
+✅ Frontend integration complete  
+✅ Unit and integration tests implemented  
 
-### Documentación de Testing
+### Testing Documentation
 
-- `docs/X402_TESTING_GUIDE.md`: Guía completa para probar x402 en la DApp
-- `test/README_X402.md`: Documentación de tests x402
-- `test/unit/Facilitator.js`: Tests unitarios del facilitador
-- `test/unit/Backend.js`: Tests unitarios del backend
-- `test/integration/X402Flow.js`: Tests de integración del flujo x402
-- `test/integration/X402EndToEnd.js`: Tests end-to-end (requiere servicios corriendo)
+- `docs/X402_TESTING_GUIDE.md`: Complete guide to test x402 in the DApp
+- `test/README_X402.md`: x402 tests documentation
+- `test/unit/Facilitator.js`: Facilitator unit tests
+- `test/unit/Backend.js`: Backend unit tests
+- `test/integration/X402Flow.js`: x402 flow integration tests
+- `test/integration/X402EndToEnd.js`: End-to-end tests (requires running services)
 
-### Próximos pasos para probar
+### Next Steps to Test
 
-1. Instalar dependencias: `npm install` en raíz, `facilitator/` y `backend/`
-2. Configurar variables de entorno (ver `.env.example` en cada directorio)
-3. Desplegar contratos en Base Sepolia: `npx hardhat run scripts/deploy.js --network baseSepolia`
-4. Iniciar servicios: `./scripts/start-x402.sh` (o manualmente)
-5. Conectar wallet a Base Sepolia y probar depósito x402 desde la DApp
+1. Install dependencies: `npm install` in root, `facilitator/` and `backend/`
+2. Configure environment variables (see `.env.example` in each directory)
+3. Deploy contracts on Base Sepolia: `npx hardhat run scripts/deploy.js --network baseSepolia`
+4. Start services: `./scripts/start-x402.sh` (or manually)
+5. Connect wallet to Base Sepolia and test x402 deposit from the DApp
 
-Ver `docs/X402_TESTING_GUIDE.md` para instrucciones detalladas.
+See `docs/X402_TESTING_GUIDE.md` for detailed instructions.
 
-## 🧭 Seeding y configuración de redes
-- Direcciones por red en `src/config.json` (31337 Hardhat, 11155111 Sepolia).
-- El script `scripts/seed.js` toma direcciones de `config.json` (o variables de entorno con las mismas keys `token`, `dbank`, `strategyRouter`, `configManager`, `mockS1`).
-- Montos/caps en Sepolia son reducidos por defecto; ajusta caps si necesitas depósitos mayores (ver `docs/SEED.md`).
+## 🧭 Seeding and Network Configuration
+- Network addresses in `src/config.json` (31337 Hardhat, 11155111 Sepolia).
+- The `scripts/seed.js` script reads addresses from `config.json` (or environment variables with the same keys: `token`, `dbank`, `strategyRouter`, `configManager`, `mockS1`).
+- Amounts/caps in Sepolia are reduced by default; adjust caps if you need larger deposits (see `docs/SEED.md`).
 
 ## 📖 Learn More
 

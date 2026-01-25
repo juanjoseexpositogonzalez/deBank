@@ -51,7 +51,7 @@ const Strategies = () => {
   const userShares = useSelector(state => state.dBank.shares) || "0";
   const [userSharesOnChain, setUserSharesOnChain] = useState(null);
   const [allocationSharesByStrategy, setAllocationSharesByStrategy] = useState([]);
-  const [pricePerShare, setPricePerShare] = useState("0");
+  const [, setPricePerShare] = useState("0"); // Used internally for calculations
   const userSharesStr = useMemo(() => {
     if (!userShares) return '0';
     if (Array.isArray(userShares)) return '0';
