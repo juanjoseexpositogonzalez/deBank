@@ -543,7 +543,46 @@ export const depositFunds = async (provider, dBank, tokens, account, usdcAmount,
         return true;
 
     } catch (error) {
-        dispatch(depositFail(error.message));
+        // Extract more detailed error message
+        let errorMessage = error.message || 'Unknown error';
+        
+        // Try to extract revert reason from error
+        if (error.reason) {
+            errorMessage = error.reason;
+        } else if (error.data) {
+            // Try to decode error data
+            try {
+                const iface = new ethers.utils.Interface([
+                    "error dBank__CapExceeded(uint256 requested, uint256 available)",
+                    "error dBank__InsufficientLiquidity(uint256 requested, uint256 available)",
+                    "error dBank__InvalidAmount()",
+                    "error dBank__Paused()",
+                    "error dBank__InvalidReceiver()"
+                ]);
+                const decoded = iface.parseError(error.data);
+                if (decoded) {
+                    if (decoded.name === 'dBank__CapExceeded') {
+                        const requested = ethers.utils.formatUnits(decoded.args[0], 18);
+                        const available = ethers.utils.formatUnits(decoded.args[1], 18);
+                        errorMessage = `Deposit cap exceeded. Requested: ${requested} tokens, Available: ${available} tokens`;
+                    } else if (decoded.name === 'dBank__InsufficientLiquidity') {
+                        errorMessage = 'Insufficient liquidity in vault';
+                    } else if (decoded.name === 'dBank__InvalidAmount') {
+                        errorMessage = 'Invalid deposit amount';
+                    } else if (decoded.name === 'dBank__Paused') {
+                        errorMessage = 'Vault is paused';
+                    } else {
+                        errorMessage = decoded.name;
+                    }
+                }
+            } catch (decodeError) {
+                // If decoding fails, use original message
+                console.error('Error decoding revert:', decodeError);
+            }
+        }
+        
+        console.error('Deposit error:', error);
+        dispatch(depositFail(errorMessage));
         return false;
     }
 }
