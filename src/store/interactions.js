@@ -386,8 +386,20 @@ export const loadUserStrategyAllocations = async (strategyRouter, account, dispa
                                 strategyRouter.provider
                             );
                             const strategyTotalAssetsBN = await strategy.totalAssets();
+                            
+                            // Log for debugging yield calculation
+                            if (i === 1) { // Only log for strategy 1 to avoid spam
+                                console.log('loadUserStrategyAllocations - Strategy 1:', {
+                                    allocation: ethers.utils.formatUnits(allocationBN, 18),
+                                    strategyTotalAssets: ethers.utils.formatUnits(strategyTotalAssetsBN, 18),
+                                    strategyAllocated: ethers.utils.formatUnits(strategyAllocatedBN, 18),
+                                    calculatedValue: ethers.utils.formatUnits(allocationBN.mul(strategyTotalAssetsBN).div(strategyAllocatedBN), 18)
+                                });
+                            }
+                            
                             allocationValueBN = allocationBN.mul(strategyTotalAssetsBN).div(strategyAllocatedBN);
                         } catch (error) {
+                            console.error(`Error getting totalAssets for strategy ${i}:`, error);
                             allocationValueBN = allocationBN;
                         }
                     } else {
@@ -491,21 +503,47 @@ export const loadConfigManager = async (provider, chainId, dispatch) => {
 // ----------------------------------------------------------
 // LOAD BALANCES AND SHAPES
 export const loadBalances = async(dBank, tokens, account, dispatch) => {
-    const usdcBalance = await tokens[0].balanceOf(account)
-    // Use 18 decimals explicitly (token has 18 decimals)
-    dispatch(balancesLoaded([
-        ethers.utils.formatUnits(usdcBalance.toString(), 18)
-    ]))
-
-    const totalAssets = await dBank.totalAssets()
-    const totalSupply = await dBank.totalSupply()
-    const shares = await dBank.balanceOf(account)
-    // Use 18 decimals explicitly
-    dispatch(setAssets(ethers.utils.formatUnits(totalAssets.toString(), 18)))
-    dispatch(setTotalSupply(ethers.utils.formatUnits(totalSupply.toString(), 18)))
-    dispatch(sharesLoaded(ethers.utils.formatUnits(shares.toString(), 18)))
-
-    return { usdcBalance, shares, totalAssets, totalSupply }
+    try {
+        // Obtener valores desde la blockchain
+        const usdcBalance = await tokens[0].balanceOf(account);
+        const totalAssets = await dBank.totalAssets();
+        const totalSupply = await dBank.totalSupply();
+        const shares = await dBank.balanceOf(account);
+        
+        // Formatear valores con 18 decimales
+        const usdcBalanceFormatted = ethers.utils.formatUnits(usdcBalance.toString(), 18);
+        const totalAssetsFormatted = ethers.utils.formatUnits(totalAssets.toString(), 18);
+        const totalSupplyFormatted = ethers.utils.formatUnits(totalSupply.toString(), 18);
+        const sharesFormatted = ethers.utils.formatUnits(shares.toString(), 18);
+        
+        // Log para debugging
+        console.log('loadBalances - Raw values:', {
+            usdcBalance: usdcBalance.toString(),
+            shares: shares.toString(),
+            totalAssets: totalAssets.toString(),
+            totalSupply: totalSupply.toString()
+        });
+        
+        console.log('loadBalances - Formatted values:', {
+            usdcBalance: usdcBalanceFormatted,
+            shares: sharesFormatted,
+            totalAssets: totalAssetsFormatted,
+            totalSupply: totalSupplyFormatted
+        });
+        
+        // Dispatch actualizaciones a Redux
+        dispatch(balancesLoaded([usdcBalanceFormatted]));
+        dispatch(setAssets(totalAssetsFormatted));
+        dispatch(setTotalSupply(totalSupplyFormatted));
+        dispatch(sharesLoaded(sharesFormatted));
+        
+        console.log('loadBalances - Dispatched to Redux');
+        
+        return { usdcBalance, shares, totalAssets, totalSupply };
+    } catch (error) {
+        console.error('Error in loadBalances:', error);
+        throw error;
+    }
 }
 // ----------------------------------------------------------
 // DEPOSIT FUNDS
@@ -809,6 +847,10 @@ export const withdrawFunds = async (provider, dBank, tokens, account, usdcAmount
 
         dispatch(withdrawSuccess(withdrawTx.hash));
 
+        // Esperar un poco para asegurar que la transacción esté confirmada
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Recargar balances después del withdraw
         await loadBalances(dBank, tokens, account, dispatch);
 
         return true;
@@ -820,24 +862,136 @@ export const withdrawFunds = async (provider, dBank, tokens, account, usdcAmount
 
 // ----------------------------------------------------------
 // ALLOCATE TO STRATEGY (StrategyRouter.depositToStrategy)
-export const allocateToStrategy = async (provider, strategyRouter, tokens, account, amount, strategyId, dispatch) => {
+export const allocateToStrategy = async (provider, strategyRouter, tokens, account, amount, strategyId, dispatch, dBank) => {
     try {
         const signer = provider.getSigner();
         const amountInWei = ethers.utils.parseUnits(amount, 18);
 
+        console.log('allocateToStrategy - Starting allocation:', {
+            account,
+            amount,
+            amountInWei: amountInWei.toString(),
+            strategyId,
+            routerAddress: strategyRouter.address
+        });
+
         const tokenWithSigner = tokens[0].connect(signer);
         const routerWithSigner = strategyRouter.connect(signer);
 
-        // Check allowance to router
-        const currentAllowance = await tokens[0].allowance(account, strategyRouter.address);
-        if (currentAllowance.lt(amountInWei)) {
-            const approveTx = await tokenWithSigner.approve(strategyRouter.address, amountInWei);
-            await approveTx.wait();
+        // Pre-flight checks before attempting transaction
+        // 1. Check user token balance
+        let userBalance = await tokens[0].balanceOf(account);
+        console.log('allocateToStrategy - User token balance:', ethers.utils.formatUnits(userBalance, 18));
+        
+        // If user doesn't have enough tokens but has shares in dBank, withdraw tokens first
+        if (userBalance.lt(amountInWei) && dBank) {
+            try {
+                // Check user shares in dBank
+                const userShares = await dBank.balanceOf(account);
+                console.log('allocateToStrategy - User shares in dBank:', ethers.utils.formatUnits(userShares, 18));
+                
+                if (userShares.gt(0)) {
+                    // Check if user has allocated shares (can't withdraw if allocated)
+                    const userTotalAllocated = await strategyRouter.getUserTotalAllocated(account);
+                    console.log('allocateToStrategy - User total allocated:', ethers.utils.formatUnits(userTotalAllocated, 18));
+                    
+                    // Calculate how much we need to withdraw
+                    const neededTokens = amountInWei.sub(userBalance);
+                    
+                    // Convert needed tokens to shares (to check if user has enough)
+                    const neededShares = await dBank.convertToShares(neededTokens);
+                    
+                    // Check if user has allocated shares (can't withdraw if allocated)
+                    // Convert allocated tokens to shares to check unallocated shares
+                    const allocatedShares = userTotalAllocated.gt(0) 
+                        ? await dBank.convertToShares(userTotalAllocated)
+                        : ethers.BigNumber.from(0);
+                    const unallocatedShares = userShares.sub(allocatedShares);
+                    
+                    console.log('allocateToStrategy - Needed tokens:', ethers.utils.formatUnits(neededTokens, 18));
+                    console.log('allocateToStrategy - Needed shares:', ethers.utils.formatUnits(neededShares, 18));
+                    console.log('allocateToStrategy - User total shares:', ethers.utils.formatUnits(userShares, 18));
+                    console.log('allocateToStrategy - Allocated shares:', ethers.utils.formatUnits(allocatedShares, 18));
+                    console.log('allocateToStrategy - Unallocated shares:', ethers.utils.formatUnits(unallocatedShares, 18));
+                    
+                    if (unallocatedShares.gte(neededShares)) {
+                        // Withdraw tokens from dBank to cover the shortfall
+                        console.log('allocateToStrategy - Withdrawing tokens from dBank to cover allocation...');
+                        const dBankWithSigner = dBank.connect(signer);
+                        const withdrawTx = await dBankWithSigner.withdraw(neededTokens, account, account);
+                        console.log('allocateToStrategy - Withdraw tx hash:', withdrawTx.hash);
+                        await withdrawTx.wait();
+                        console.log('allocateToStrategy - Withdraw confirmed');
+                        
+                        // Refresh balance after withdrawal
+                        userBalance = await tokens[0].balanceOf(account);
+                        console.log('allocateToStrategy - User token balance after withdraw:', ethers.utils.formatUnits(userBalance, 18));
+                    } else {
+                        const errorMsg = `Insufficient unallocated shares. You have ${ethers.utils.formatUnits(unallocatedShares, 18)} unallocated shares but need ${ethers.utils.formatUnits(neededShares, 18)} to allocate ${amount} tokens.`;
+                        console.error('allocateToStrategy - Insufficient unallocated shares:', errorMsg);
+                        return { ok: false, hash: null, error: errorMsg };
+                    }
+                }
+            } catch (withdrawError) {
+                console.error('allocateToStrategy - Error withdrawing from dBank:', withdrawError);
+                // Continue with original error if withdraw fails
+            }
+        }
+        
+        // Final balance check
+        if (userBalance.lt(amountInWei)) {
+            const errorMsg = `Insufficient balance. You have ${ethers.utils.formatUnits(userBalance, 18)} tokens but need ${amount}`;
+            console.error('allocateToStrategy - Balance check failed:', errorMsg);
+            return { ok: false, hash: null, error: errorMsg };
         }
 
-        // Deposit to strategy
+        // 2. Check strategy exists and is active
+        try {
+            const strategyInfo = await strategyRouter.getStrategy(strategyId);
+            console.log('allocateToStrategy - Strategy info:', {
+                strategy: strategyInfo.strategy,
+                active: strategyInfo.active,
+                cap: ethers.utils.formatUnits(strategyInfo.cap, 18),
+                allocated: ethers.utils.formatUnits(strategyInfo.allocated, 18)
+            });
+            
+            if (!strategyInfo.active) {
+                const errorMsg = `Strategy ${strategyId} is not active`;
+                console.error('allocateToStrategy - Strategy not active');
+                return { ok: false, hash: null, error: errorMsg };
+            }
+
+            // Check available capacity
+            const available = strategyInfo.cap.sub(strategyInfo.allocated);
+            console.log('allocateToStrategy - Available capacity:', ethers.utils.formatUnits(available, 18));
+            if (amountInWei.gt(available)) {
+                const errorMsg = `Cap exceeded. Available: ${ethers.utils.formatUnits(available, 18)}, Requested: ${amount}`;
+                console.error('allocateToStrategy - Cap check failed:', errorMsg);
+                return { ok: false, hash: null, error: errorMsg };
+            }
+        } catch (strategyError) {
+            console.error('allocateToStrategy - Strategy check failed:', strategyError);
+            return { ok: false, hash: null, error: `Strategy check failed: ${strategyError.message}` };
+        }
+
+        // 3. Check and set allowance to router
+        const currentAllowance = await tokens[0].allowance(account, strategyRouter.address);
+        console.log('allocateToStrategy - Current allowance:', ethers.utils.formatUnits(currentAllowance, 18));
+        
+        if (currentAllowance.lt(amountInWei)) {
+            console.log('allocateToStrategy - Approving tokens...');
+            const approveTx = await tokenWithSigner.approve(strategyRouter.address, amountInWei);
+            console.log('allocateToStrategy - Approval tx hash:', approveTx.hash);
+            await approveTx.wait();
+            console.log('allocateToStrategy - Approval confirmed');
+        }
+
+        // 4. Deposit to strategy
+        console.log('allocateToStrategy - Calling depositToStrategy...');
         const tx = await routerWithSigner.depositToStrategy(strategyId, amountInWei);
+        console.log('allocateToStrategy - Transaction sent:', tx.hash);
         await tx.wait();
+        console.log('allocateToStrategy - Transaction confirmed');
 
         // Refresh strategy state
         await loadStrategyRouter(provider, (await provider.getNetwork()).chainId, dispatch);
@@ -848,7 +1002,35 @@ export const allocateToStrategy = async (provider, strategyRouter, tokens, accou
         return { ok: true, hash: tx.hash };
     } catch (error) {
         console.error("allocateToStrategy error:", error);
-        return { ok: false, hash: null, error: error.message };
+        
+        // Try to extract more specific error information
+        let errorMessage = error.message;
+        if (error.reason) {
+            errorMessage = error.reason;
+        } else if (error.data && error.data.message) {
+            errorMessage = error.data.message;
+        } else if (error.error && error.error.message) {
+            errorMessage = error.error.message;
+        }
+        
+        // Check for common revert reasons
+        if (errorMessage.includes('execution reverted')) {
+            if (errorMessage.includes('StrategyRouter__CapExceeded')) {
+                errorMessage = 'Cap exceeded for this strategy. Please reduce the amount.';
+            } else if (errorMessage.includes('StrategyRouter__StrategyPaused')) {
+                errorMessage = 'This strategy is currently paused.';
+            } else if (errorMessage.includes('StrategyRouter__StrategyNotActive')) {
+                errorMessage = 'This strategy is not active.';
+            } else if (errorMessage.includes('Transfer failed')) {
+                errorMessage = 'Token transfer failed. Please check your balance and allowance.';
+            } else if (errorMessage.includes('Strategy deposit failed')) {
+                errorMessage = 'Strategy deposit failed. Please try again or contact support.';
+            } else {
+                errorMessage = `Transaction failed: ${errorMessage}. Please check your balance, allowance, and strategy status.`;
+            }
+        }
+        
+        return { ok: false, hash: null, error: errorMessage };
     }
 }
 

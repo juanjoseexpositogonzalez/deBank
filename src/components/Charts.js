@@ -56,25 +56,65 @@ const Charts = () => {
                     return;
                 }
 
-                // Query Deposit events for this user
-                const depositFilter = dBank.filters.Deposit(null, account);
-                const events = await dBank.queryFilter(depositFilter);
-                
-                if (events.length > 0) {
-                    // Get the first deposit event (oldest)
-                    const firstEvent = events[0];
-                    const block = await provider.getBlock(firstEvent.blockNumber);
-                    const timestamp = block.timestamp * 1000; // Convert to milliseconds
+                // Query Deposit events for this user with error handling
+                try {
+                    const depositFilter = dBank.filters.Deposit(null, account);
+                    // Limit search to recent blocks to avoid RPC issues
+                    let currentBlock = null;
+                    try {
+                        currentBlock = await provider.getBlockNumber();
+                    } catch (blockNumError) {
+                        console.warn('Could not get current block number:', blockNumError.message);
+                    }
                     
-                    // Store in localStorage for future use
-                    localStorage.setItem(`dBank_firstDeposit_${account}`, timestamp.toString());
-                    setUserFirstDepositTimestamp(timestamp);
-                } else {
-                    // No deposits found, use null (will use first data point)
+                    const fromBlock = currentBlock ? Math.max(0, currentBlock - 10000) : 0;
+                    const toBlock = currentBlock || 'latest';
+                    
+                    const events = await dBank.queryFilter(
+                        depositFilter, 
+                        fromBlock, 
+                        toBlock
+                    ).catch(err => {
+                        console.warn('Error querying deposit events for first timestamp:', err.message);
+                        return [];
+                    });
+                    
+                    if (events.length > 0) {
+                        // Get the first deposit event (oldest)
+                        const firstEvent = events[0];
+                        try {
+                            const block = await provider.getBlock(firstEvent.blockNumber);
+                            const timestamp = block.timestamp * 1000; // Convert to milliseconds
+                            
+                            // Store in localStorage for future use
+                            localStorage.setItem(`dBank_firstDeposit_${account}`, timestamp.toString());
+                            setUserFirstDepositTimestamp(timestamp);
+                        } catch (blockError) {
+                            console.warn('Error fetching block for first deposit:', blockError.message);
+                            // Use current timestamp as fallback
+                            try {
+                                const currentBlockData = await provider.getBlock('latest');
+                                const timestamp = currentBlockData.timestamp * 1000;
+                                setUserFirstDepositTimestamp(timestamp);
+                            } catch {
+                                setUserFirstDepositTimestamp(null);
+                            }
+                        }
+                    } else {
+                        // No deposits found, use null (will use first data point)
+                        setUserFirstDepositTimestamp(null);
+                    }
+                } catch (queryError) {
+                    console.warn('Error querying deposit events:', queryError.message);
                     setUserFirstDepositTimestamp(null);
                 }
             } catch (error) {
-                console.error('Error loading first deposit timestamp:', error);
+                // Don't log RPC errors as critical - they're often temporary
+                if (error.code !== -32002 && error.code !== -32603 && error.code !== -32005) {
+                    console.error('Error loading first deposit timestamp:', error);
+                } else {
+                    console.warn('RPC error loading first deposit timestamp (non-critical):', error.message);
+                }
                 setUserFirstDepositTimestamp(null);
             }
         };
@@ -104,10 +144,25 @@ const Charts = () => {
             if (!dBank || !provider) return;
 
             try {
-                // Query all relevant events from dBank
-                const depositEvents = await dBank.queryFilter(dBank.filters.Deposit());
-                const allocateEvents = await dBank.queryFilter(dBank.filters.Allocated());
-                const feesEvents = await dBank.queryFilter(dBank.filters.FeesCrystallized());
+                // Limit the range of events to query (last 10000 blocks to avoid RPC limits)
+                const currentBlock = await provider.getBlockNumber();
+                const fromBlock = Math.max(0, currentBlock - 10000);
+                
+                console.log('Loading historical data from block', fromBlock, 'to', currentBlock);
+                
+                // Query all relevant events from dBank with block range limit
+                const depositEvents = await dBank.queryFilter(dBank.filters.Deposit(), fromBlock, currentBlock).catch(err => {
+                    console.warn('Error querying Deposit events:', err.message);
+                    return [];
+                });
+                const allocateEvents = await dBank.queryFilter(dBank.filters.Allocated(), fromBlock, currentBlock).catch(err => {
+                    console.warn('Error querying Allocated events:', err.message);
+                    return [];
+                });
+                const feesEvents = await dBank.queryFilter(dBank.filters.FeesCrystallized(), fromBlock, currentBlock).catch(err => {
+                    console.warn('Error querying FeesCrystallized events:', err.message);
+                    return [];
+                });
                 
                 // Get all unique block numbers from all events
                 const blockNumbers = new Set();
@@ -115,11 +170,30 @@ const Charts = () => {
                 allocateEvents.forEach(e => blockNumbers.add(e.blockNumber));
                 feesEvents.forEach(e => blockNumbers.add(e.blockNumber));
                 
-                // Get timestamps for all blocks
+                // Get timestamps for all blocks (with error handling)
                 const blockTimestamps = {};
-                for (const blockNum of blockNumbers) {
-                    const block = await provider.getBlock(blockNum);
-                    blockTimestamps[blockNum] = block.timestamp * 1000; // Convert to milliseconds
+                const blockNumbersArray = Array.from(blockNumbers).sort((a, b) => a - b);
+                
+                // Process blocks in batches to avoid overwhelming the RPC
+                const batchSize = 10;
+                for (let i = 0; i < blockNumbersArray.length; i += batchSize) {
+                    const batch = blockNumbersArray.slice(i, i + batchSize);
+                    await Promise.all(batch.map(async (blockNum) => {
+                        try {
+                            const block = await provider.getBlock(blockNum);
+                            blockTimestamps[blockNum] = block.timestamp * 1000; // Convert to milliseconds
+                        } catch (err) {
+                            console.warn(`Error fetching block ${blockNum}:`, err.message);
+                            // Use approximate timestamp if block fetch fails
+                            const currentBlock = await provider.getBlock('latest');
+                            blockTimestamps[blockNum] = currentBlock.timestamp * 1000;
+                        }
+                    }));
+                    
+                    // Small delay between batches to avoid rate limiting
+                    if (i + batchSize < blockNumbersArray.length) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
                 }
                 
                 // Build historical data points from events
@@ -255,6 +329,11 @@ const Charts = () => {
                 
             } catch (error) {
                 console.error('Error loading historical data:', error);
+                // Don't show error to user if it's just a data loading issue
+                // The charts will still work with current data
+                if (error.code !== -32603 && !error.message.includes('Failed to fetch')) {
+                    console.warn('Historical data loading failed, but charts will continue with current data');
+                }
             }
         };
 
@@ -299,19 +378,24 @@ const Charts = () => {
 
                 setPricePerShare(currentPricePerShare.toString());
 
-                // Add current point to history if it's different from last point
+                // Add current point to history
                 const currentTimestamp = currentBlock.timestamp * 1000;
                 setHistoricalData(prev => {
                     const lastPricePoint = prev.pricePerShare[prev.pricePerShare.length - 1];
-                    const priceHistory = [...prev.pricePerShare];
+                    let priceHistory = [...prev.pricePerShare];
                     
-                    // Only add if it's been at least 1 minute since last point or price changed significantly
-                    if (!lastPricePoint || 
+                    // Always add current point if timestamp changed significantly (more than 1 minute)
+                    // or if price changed, or if this is the first point
+                    const shouldAddPricePoint = !lastPricePoint || 
                         (currentTimestamp - lastPricePoint.x > 60000) || 
-                        Math.abs(lastPricePoint.y - currentPricePerShare) > 0.0001) {
+                        Math.abs(lastPricePoint.y - currentPricePerShare) > 0.0001;
+                    
+                    if (shouldAddPricePoint) {
+                        // Remove any existing point at this timestamp to avoid duplicates
+                        priceHistory = priceHistory.filter(p => Math.abs(p.x - currentTimestamp) > 1000);
                         priceHistory.push({ x: currentTimestamp, y: currentPricePerShare });
-                        // Keep last 30 points
-                        priceHistory.sort((a, b) => a.x - b.x).slice(-30);
+                        // Sort and keep last 30 points
+                        priceHistory = priceHistory.sort((a, b) => a.x - b.x).slice(-30);
                     }
                     
                     // Update user shares value if account is connected
@@ -319,13 +403,17 @@ const Charts = () => {
                     if (account) {
                         const lastUserValuePoint = userSharesValueHistory[userSharesValueHistory.length - 1];
                         
-                        // Only add if it's been at least 1 minute since last point or value changed significantly
-                        if (!lastUserValuePoint || 
+                        // Always add current point if timestamp changed significantly or value changed
+                        const shouldAddUserValuePoint = !lastUserValuePoint || 
                             (currentTimestamp - lastUserValuePoint.x > 60000) || 
-                            Math.abs(lastUserValuePoint.y - currentUserValue) > 0.01) {
+                            Math.abs(lastUserValuePoint.y - currentUserValue) > 0.01;
+                        
+                        if (shouldAddUserValuePoint) {
+                            // Remove any existing point at this timestamp to avoid duplicates
+                            userSharesValueHistory = userSharesValueHistory.filter(p => Math.abs(p.x - currentTimestamp) > 1000);
                             userSharesValueHistory.push({ x: currentTimestamp, y: currentUserValue });
-                            // Keep last 30 points
-                            userSharesValueHistory.sort((a, b) => a.x - b.x).slice(-30);
+                            // Sort and keep last 30 points
+                            userSharesValueHistory = userSharesValueHistory.sort((a, b) => a.x - b.x).slice(-30);
                         }
                     }
                     
@@ -344,8 +432,9 @@ const Charts = () => {
 
         loadChartData();
 
-        // Refresh data every 10 seconds for smoother UI updates
-        const interval = setInterval(loadChartData, 10000);
+        // Refresh data every 5 seconds for smoother UI updates (reduced from 10s)
+        // This ensures charts update quickly when blockchain time advances
+        const interval = setInterval(loadChartData, 5000);
         return () => clearInterval(interval);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [dBank, provider, account, userTotalAllocated, userTotalAllocatedValue]);

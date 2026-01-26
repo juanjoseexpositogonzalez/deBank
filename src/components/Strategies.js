@@ -4,7 +4,7 @@ import { Card, Form, Button, InputGroup, Row, Spinner, Table } from 'react-boots
 import { ethers } from 'ethers';
 
 import Alert from './Alert';
-import { allocateToStrategy, unallocateFromStrategy, loadUserStrategyAllocations, loadBalances } from '../store/interactions';
+import { allocateToStrategy, unallocateFromStrategy, loadUserStrategyAllocations, loadBalances, loadStrategyRouter } from '../store/interactions';
 
 const formatBn = (bn) => {
   try {
@@ -284,9 +284,16 @@ const Strategies = () => {
     let hash = null;
     try {
       if (mode === 'allocate') {
-        const res = await allocateToStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch);
+        const res = await allocateToStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch, dBank);
         ok = res.ok;
         hash = res.hash || null;
+        
+        // Show detailed error message if allocation failed
+        if (!ok && res.error) {
+          alert(`Allocation failed: ${res.error}`);
+          setIsAllocating(false);
+          return;
+        }
         if (ok && account && res.hash) {
           const existing = localStorage.getItem(`dBank_firstAllocation_${account}`);
           if (!existing) {
@@ -308,8 +315,22 @@ const Strategies = () => {
         ok = res.ok;
         hash = res.hash || null;
       }
-      if (ok && dBank && tokens && account) {
-        await loadBalances(dBank, tokens, account, dispatch);
+      if (ok) {
+        // Wait a bit for transaction confirmation
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Reload all relevant data after successful allocation/unallocation
+        if (dBank && tokens && account) {
+          await loadBalances(dBank, tokens, account, dispatch);
+        }
+        
+        if (strategyRouter && account) {
+          await loadUserStrategyAllocations(strategyRouter, account, dispatch);
+        }
+        
+        if (provider && chainId) {
+          await loadStrategyRouter(provider, chainId, dispatch);
+        }
       }
     } catch (error) {
       console.error("Error in handleSubmit:", error);
@@ -351,6 +372,16 @@ const Strategies = () => {
       }
     };
     loadAllocations();
+    
+    // Also reload allocations periodically to catch blockchain time advances
+    // This ensures yield is reflected when time advances
+    const interval = setInterval(() => {
+      if (strategyRouter && account) {
+        loadAllocations();
+      }
+    }, 5000); // Reload every 5 seconds
+    
+    return () => clearInterval(interval);
   }, [strategyRouter, account, dispatch]);
 
   return (

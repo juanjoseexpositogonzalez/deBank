@@ -79,6 +79,22 @@ const Withdraw = () => {
         refreshBalances();
     }, [account, dBank, tokens, dispatch]);
     
+    // También refrescar cuando cambia el estado de withdraw (después de un withdraw exitoso)
+    useEffect(() => {
+        if (isWithdrawSuccess && dBank && tokens && account) {
+            // Pequeño delay para asegurar que la transacción esté confirmada
+            const timer = setTimeout(async () => {
+                try {
+                    await loadBalances(dBank, tokens, account, dispatch);
+                    console.log('Balances refreshed after withdraw success');
+                } catch (error) {
+                    console.error("Error refreshing balances after withdraw:", error);
+                }
+            }, 1500);
+            return () => clearTimeout(timer);
+        }
+    }, [isWithdrawSuccess, dBank, tokens, account, dispatch]);
+    
     useEffect(() => {
         const calculateAvailableShares = async () => {
             if (!shares || !dBank || !strategyRouter || !userTotalAllocated || parseFloat(userTotalAllocated) === 0) {

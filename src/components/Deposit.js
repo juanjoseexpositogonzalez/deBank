@@ -14,7 +14,7 @@ import {
 import { isX402Available } from '../utils/x402Config';
 
 import { useSelector, useDispatch } from 'react-redux';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 
 const Deposit = () => {
@@ -40,6 +40,29 @@ const Deposit = () => {
     const dBank = useSelector(state => state.dBank.contract);
 
     const dispatch = useDispatch();
+
+    // Debug: Log cuando cambian los valores de shares o balances
+    useEffect(() => {
+        console.log('Deposit component - shares updated:', shares);
+        console.log('Deposit component - balances updated:', balances);
+    }, [shares, balances]);
+
+    // Refrescar balances cuando hay un depósito exitoso (especialmente para x402)
+    useEffect(() => {
+        if (isDepositSuccess && dBank && tokens && tokens.length > 0 && account) {
+            // Delay para asegurar que la transacción esté confirmada
+            const timer = setTimeout(async () => {
+                try {
+                    console.log('Refreshing balances due to deposit success...');
+                    await loadBalances(dBank, tokens, account, dispatch);
+                    console.log('Balances refreshed from useEffect after deposit success');
+                } catch (error) {
+                    console.error('Error refreshing balances in useEffect:', error);
+                }
+            }, 2000);
+            return () => clearTimeout(timer);
+        }
+    }, [isDepositSuccess, dBank, tokens, account, dispatch]);
 
     // Helper function to format numbers with max 4 decimals
     const formatWithMaxDecimals = (value, maxDecimals = 4) => {
@@ -169,33 +192,57 @@ const Deposit = () => {
                 setShowAlert(true);
                 
                 if (result && result.ok) {
-                    // Esperar un poco para que la transacción se confirme en la blockchain
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    // Esperar un poco más para que la transacción se confirme completamente en la blockchain
+                    // Base Sepolia puede tener tiempos de confirmación variables
+                    await new Promise(resolve => setTimeout(resolve, 3000));
                     
                     // Recargar balances después de depósito exitoso
                     // Usar los contratos del estado Redux, o recargarlos si no están disponibles
                     try {
-                        if (dBank && tokens && tokens.length > 0 && account) {
-                            await loadBalances(dBank, tokens, account, dispatch);
-                            console.log('Balances reloaded after x402 deposit');
-                        } else {
-                            // Si los contratos no están disponibles, intentar recargarlos
-                            console.warn('Contracts not available, attempting to reload...', {
-                                hasDBank: !!dBank,
-                                hasTokens: !!tokens,
-                                tokensLength: tokens?.length,
-                                hasAccount: !!account
-                            });
-                            
-                            // Recargar contratos y balances
-                            const { loadTokens, loadBank } = await import('../store/interactions');
-                            const freshTokens = await loadTokens(provider, chainId, dispatch);
-                            const freshDBank = await loadBank(provider, chainId, dispatch);
-                            
-                            if (freshDBank && freshTokens && freshTokens.length > 0 && account) {
-                                await loadBalances(freshDBank, freshTokens, account, dispatch);
-                                console.log('Balances reloaded after reloading contracts');
+                        // Intentar múltiples veces para asegurar que los valores se actualicen
+                        let retries = 3;
+                        let balancesUpdated = false;
+                        
+                        while (retries > 0 && !balancesUpdated) {
+                            try {
+                                if (dBank && tokens && tokens.length > 0 && account) {
+                                    await loadBalances(dBank, tokens, account, dispatch);
+                                    console.log(`Balances reloaded after x402 deposit (attempt ${4 - retries})`);
+                                    
+                                    // Verificar que los valores se actualizaron
+                                    await new Promise(resolve => setTimeout(resolve, 500));
+                                    balancesUpdated = true;
+                                } else {
+                                    // Si los contratos no están disponibles, intentar recargarlos
+                                    console.warn('Contracts not available, attempting to reload...', {
+                                        hasDBank: !!dBank,
+                                        hasTokens: !!tokens,
+                                        tokensLength: tokens?.length,
+                                        hasAccount: !!account
+                                    });
+                                    
+                                    // Recargar contratos y balances
+                                    const { loadTokens, loadBank } = await import('../store/interactions');
+                                    const freshTokens = await loadTokens(provider, chainId, dispatch);
+                                    const freshDBank = await loadBank(provider, chainId, dispatch);
+                                    
+                                    if (freshDBank && freshTokens && freshTokens.length > 0 && account) {
+                                        await loadBalances(freshDBank, freshTokens, account, dispatch);
+                                        console.log('Balances reloaded after reloading contracts');
+                                        balancesUpdated = true;
+                                    }
+                                }
+                            } catch (retryError) {
+                                console.warn(`Retry ${4 - retries} failed:`, retryError.message);
+                                retries--;
+                                if (retries > 0) {
+                                    await new Promise(resolve => setTimeout(resolve, 1000));
+                                }
                             }
+                        }
+                        
+                        if (!balancesUpdated) {
+                            console.error('Failed to update balances after multiple retries');
                         }
                     } catch (balanceError) {
                         console.error('Error reloading balances after x402 deposit:', balanceError);
@@ -234,7 +281,7 @@ const Deposit = () => {
                 <Form onSubmit={depositHandler} style={{ maxWidht: '450px', margin: '50px auto'}}>
                     <Row>
                         <Form.Text className='text-end my-2' style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
-                            Balance: {formatWithMaxDecimals(balances[0])}
+                            Balance: {formatWithMaxDecimals(balances && balances[0] ? balances[0] : "0")}
                             {balances && balances[0] && parseFloat(balances[0]) > 0 && (
                                 <span
                                     onClick={maxHandlerBalance}
@@ -269,7 +316,7 @@ const Deposit = () => {
 
                     <Row className='my-3'>                        
                         <Form.Text className='text-end my-2' style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
-                            Shares: {formatWithMaxDecimals(shares)}
+                            Shares: {formatWithMaxDecimals(shares || "0")}
                             {shares && parseFloat(shares) > 0 && (
                                 <span
                                     onClick={maxHandlerShares}
