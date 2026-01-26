@@ -14,7 +14,8 @@ module.exports = {
     baseSepolia: {
       url: process.env.BASE_SEPOLIA_RPC_URL || "https://sepolia.base.org",
       accounts: privateKeys.split(":").filter(key => key !== ""),
-      chainId: 84532
+      chainId: 84532,
+      timeout: 60000
     },
     // hardhat: {
     //   forking: {
