@@ -16,6 +16,28 @@
       "address": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
     }
   },
+  "84532": {
+    "token": {
+      "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+    },
+    "dbank": {
+      "address": "0x53c7e1Cf2e0a7f9a210850660B3b27B711d973a2"
+    },
+    "strategyRouter": {
+      "address": "0x931ca9e047cC9478349a44a5BAd19b82c6C114d0"
+    },
+    "configManager": {
+      "address": "0x737E2af2FFfC4887E57260b9eebdd98d994f3265"
+    },
+    "mockS1": {
+      "address": "0x97F11C766DC0452b1aF6cbC522c00CE84e758345"
+    },
+    "x402": {
+      "facilitatorUrl": "http://localhost:4022",
+      "treasuryWallet": "",
+      "backendUrl": "http://localhost:4021"
+    }
+  },
   "11155111": {
     "token": {
       "address": "0x595Af03530428b3126EE4Aa208d715ca9072901f"
@@ -31,28 +53,6 @@
     },
     "mockS1": {
       "address": "0x50227f0402667742A0d0BC8F1613f116596ad3c0"
-    }
-  },
-  "84532": {
-    "token": {
-      "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
-    },
-    "dbank": {
-      "address": ""
-    },
-    "strategyRouter": {
-      "address": ""
-    },
-    "configManager": {
-      "address": ""
-    },
-    "mockS1": {
-      "address": ""
-    },
-    "x402": {
-      "facilitatorUrl": "http://localhost:4022",
-      "treasuryWallet": "",
-      "backendUrl": "http://localhost:4021"
     }
   }
 }

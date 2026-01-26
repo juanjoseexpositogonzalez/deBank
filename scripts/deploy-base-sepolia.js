@@ -1,0 +1,199 @@
+// Deploy script específico para Base Sepolia
+// En Base Sepolia usamos el USDC real (0x036CbD53842c5426634e7929541eC2318f3dCF7e)
+// Solo desplegamos los contratos que necesitamos (no el token)
+
+require("dotenv").config();
+const hre = require("hardhat");
+const { ethers } = require("hardhat");
+const fs = require("fs");
+const path = require("path");
+
+async function main() {
+  const [deployer] = await ethers.getSigners();
+  console.log("Deploying contracts to Base Sepolia with account:", deployer.address);
+  console.log("Account balance:", ethers.utils.formatEther(await deployer.getBalance()), "ETH\n");
+
+  // Get current nonce - use pending to account for pending transactions
+  let nonce = await deployer.getTransactionCount("pending");
+  console.log(`Starting with nonce: ${nonce}\n`);
+
+  // Get gas price and increase it slightly to ensure transaction goes through
+  const gasPrice = await deployer.provider.getGasPrice();
+  const increasedGasPrice = gasPrice.mul(110).div(100); // Increase by 10%
+  console.log(`Gas price: ${ethers.utils.formatUnits(gasPrice, 'gwei')} gwei (using ${ethers.utils.formatUnits(increasedGasPrice, 'gwei')} gwei)\n`);
+
+  // USDC real de Base Sepolia (no desplegamos token nuevo)
+  const USDC_ADDRESS = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+  console.log("Using existing USDC token:", USDC_ADDRESS, "\n");
+
+  const VAULT_NAME = 'dBank USDC Vault';
+  const VAULT_SYMBOL = 'dbUSDC';
+
+  // MockS1 parameters (Strategy S1)
+  const S1_APR_BPS = 500; // 5% APR (500 basis points)
+  const S1_CAP = ethers.utils.parseUnits('1000000', 6); // 1M tokens cap (USDC tiene 6 decimals)
+  const S1_STRATEGY_ID = 1; // Strategy S1 ID
+
+  // ============================================================
+  // 1. Deploy ConfigManager
+  // ============================================================
+  console.log("1. Deploying ConfigManager...");
+  const ConfigManager = await ethers.getContractFactory('ConfigManager');
+  const configManager = await ConfigManager.deploy({
+    nonce: nonce++,
+    gasPrice: increasedGasPrice
+  });
+  await configManager.deployed();
+  console.log(`   ✓ ConfigManager deployed at: ${configManager.address}\n`);
+
+  // ============================================================
+  // 2. Deploy StrategyRouter
+  // ============================================================
+  console.log("2. Deploying StrategyRouter...");
+  const StrategyRouter = await ethers.getContractFactory('StrategyRouter');
+  const strategyRouter = await StrategyRouter.deploy(USDC_ADDRESS, configManager.address, {
+    nonce: nonce++,
+    gasPrice: increasedGasPrice
+  });
+  await strategyRouter.deployed();
+  console.log(`   ✓ StrategyRouter deployed at: ${strategyRouter.address}\n`);
+
+  // ============================================================
+  // 3. Deploy MockS1 (Strategy S1)
+  // ============================================================
+  console.log("3. Deploying MockS1 (Strategy S1)...");
+  const MockS1 = await ethers.getContractFactory('MockS1');
+  const mockS1 = await MockS1.deploy(USDC_ADDRESS, {
+    nonce: nonce++,
+    gasPrice: increasedGasPrice
+  });
+  await mockS1.deployed();
+  console.log(`   ✓ MockS1 deployed at: ${mockS1.address}`);
+
+  // Configure MockS1 parameters
+  console.log("   Configuring MockS1 parameters...");
+  await mockS1.setParams(S1_APR_BPS, S1_CAP, {
+    nonce: nonce++,
+    gasPrice: increasedGasPrice
+  });
+  console.log(`   ✓ MockS1 configured: APR=${S1_APR_BPS} bps (${S1_APR_BPS/100}%), Cap=${ethers.utils.formatUnits(S1_CAP, 6)} tokens\n`);
+
+  // ============================================================
+  // 4. Register MockS1 in StrategyRouter
+  // ============================================================
+  console.log("4. Registering MockS1 in StrategyRouter...");
+  await strategyRouter.registerStrategy(S1_STRATEGY_ID, mockS1.address, S1_CAP, {
+    nonce: nonce++,
+    gasPrice: increasedGasPrice
+  });
+  console.log(`   ✓ MockS1 registered as strategy ID ${S1_STRATEGY_ID}\n`);
+
+  // ============================================================
+  // 5. Deploy dBank (ERC-4626 Vault)
+  // ============================================================
+  console.log("5. Deploying dBank (ERC-4626 Vault)...");
+  const dBank = await ethers.getContractFactory('dBank');
+  const dbank = await dBank.deploy(
+    USDC_ADDRESS,
+    VAULT_NAME,
+    VAULT_SYMBOL,
+    strategyRouter.address,
+    configManager.address,
+    {
+      nonce: nonce++,
+      gasPrice: increasedGasPrice
+    }
+  );
+  await dbank.deployed();
+  console.log(`   ✓ dBank deployed at: ${dbank.address}\n`);
+
+  // ============================================================
+  // Deployment summary
+  // ============================================================
+  console.log("==========================================");
+  console.log("DEPLOYMENT SUMMARY - BASE SEPOLIA");
+  console.log("==========================================");
+  console.log(`USDC Token (existing):     ${USDC_ADDRESS}`);
+  console.log(`ConfigManager:             ${configManager.address}`);
+  console.log(`StrategyRouter:            ${strategyRouter.address}`);
+  console.log(`MockS1 (Strategy S1):     ${mockS1.address}`);
+  console.log(`dBank (Vault):             ${dbank.address}`);
+  console.log("==========================================\n");
+
+  // ============================================================
+  // Update config.json
+  // ============================================================
+  console.log("Updating src/config.json...");
+  const configPath = path.join(__dirname, '../src/config.json');
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  
+  config['84532'] = {
+    ...config['84532'],
+    token: {
+      address: USDC_ADDRESS
+    },
+    dbank: {
+      address: dbank.address
+    },
+    strategyRouter: {
+      address: strategyRouter.address
+    },
+    configManager: {
+      address: configManager.address
+    },
+    mockS1: {
+      address: mockS1.address
+    },
+    x402: {
+      ...config['84532'].x402
+    }
+  };
+
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  console.log("✓ config.json updated\n");
+
+  // ============================================================
+  // Optional verification
+  // ============================================================
+  if (process.env.ETHERSCAN_API_KEY || process.env.BASESCAN_API_KEY) {
+    console.log("Waiting for confirmations before verifying...");
+    await configManager.deployTransaction.wait(5);
+    await strategyRouter.deployTransaction.wait(5);
+    await mockS1.deployTransaction.wait(5);
+    await dbank.deployTransaction.wait(5);
+
+    console.log("Verifying contracts on Basescan...");
+    try {
+      await hre.run("verify:verify", {
+        address: configManager.address,
+        constructorArguments: [],
+      });
+      await hre.run("verify:verify", {
+        address: strategyRouter.address,
+        constructorArguments: [USDC_ADDRESS, configManager.address],
+      });
+      await hre.run("verify:verify", {
+        address: mockS1.address,
+        constructorArguments: [USDC_ADDRESS],
+      });
+      await hre.run("verify:verify", {
+        address: dbank.address,
+        constructorArguments: [
+          USDC_ADDRESS,
+          VAULT_NAME,
+          VAULT_SYMBOL,
+          strategyRouter.address,
+          configManager.address
+        ],
+      });
+      console.log("✓ All contracts verified on Basescan\n");
+    } catch (error) {
+      console.log("⚠ Verification error:", error.message);
+    }
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
