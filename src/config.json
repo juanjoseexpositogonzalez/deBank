@@ -34,7 +34,7 @@
     },
     "x402": {
       "facilitatorUrl": "http://localhost:4022",
-      "treasuryWallet": "",
+      "treasuryWallet": "0x2ED0D4A0Fb3850Ddf5e4132E88314586e9184E33",
       "backendUrl": "http://localhost:4021"
     }
   },
