@@ -492,16 +492,18 @@ export const loadConfigManager = async (provider, chainId, dispatch) => {
 // LOAD BALANCES AND SHAPES
 export const loadBalances = async(dBank, tokens, account, dispatch) => {
     const usdcBalance = await tokens[0].balanceOf(account)
+    // Use 18 decimals explicitly (token has 18 decimals)
     dispatch(balancesLoaded([
-        ethers.utils.formatUnits(usdcBalance.toString(), 'ether')
+        ethers.utils.formatUnits(usdcBalance.toString(), 18)
     ]))
 
     const totalAssets = await dBank.totalAssets()
     const totalSupply = await dBank.totalSupply()
     const shares = await dBank.balanceOf(account)
-    dispatch(setAssets(ethers.utils.formatUnits(totalAssets.toString(), 'ether')))
-    dispatch(setTotalSupply(ethers.utils.formatUnits(totalSupply.toString(), 'ether')))
-    dispatch(sharesLoaded(ethers.utils.formatUnits(shares.toString(), 'ether')))
+    // Use 18 decimals explicitly
+    dispatch(setAssets(ethers.utils.formatUnits(totalAssets.toString(), 18)))
+    dispatch(setTotalSupply(ethers.utils.formatUnits(totalSupply.toString(), 18)))
+    dispatch(sharesLoaded(ethers.utils.formatUnits(shares.toString(), 18)))
 
     return { usdcBalance, shares, totalAssets, totalSupply }
 }
@@ -509,7 +511,7 @@ export const loadBalances = async(dBank, tokens, account, dispatch) => {
 // DEPOSIT FUNDS
 export const depositFunds = async (provider, dBank, tokens, account, usdcAmount, dispatch) => {
     try {
-        dispatch(depositRequest());
+        dispatch(depositRequest({ isX402: false }));
 
         const signer = provider.getSigner();
         const amountInWei = ethers.utils.parseUnits(usdcAmount, 18);
@@ -535,7 +537,7 @@ export const depositFunds = async (provider, dBank, tokens, account, usdcAmount,
         const depositTx = await dBankWIthSigner.deposit(amountInWei, account);
         await depositTx.wait(); // Wait for confirmation
 
-        dispatch(depositSuccess(depositTx.hash));
+        dispatch(depositSuccess({ hash: depositTx.hash, isX402: false }));
         
         // Step 4. Refresh balances
         await loadBalances(dBank, tokens, account, dispatch);
@@ -591,7 +593,7 @@ export const depositFunds = async (provider, dBank, tokens, account, usdcAmount,
 // DEPOSIT VIA X402
 export const depositViaX402 = async (provider, account, amount, dispatch, chainId) => {
     try {
-        dispatch(depositRequest());
+        dispatch(depositRequest({ isX402: true }));
 
         // Verificar que estamos en Base Sepolia (84532)
         const chainIdNum = typeof chainId === 'string' ? parseInt(chainId) : chainId;
@@ -719,7 +721,7 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
         }
 
         // Dispatch success action
-        dispatch(depositSuccess(result.txHash));
+        dispatch(depositSuccess({ hash: result.txHash, isX402: true }));
         
         console.log('x402 deposit successful:', result);
 

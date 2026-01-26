@@ -27,6 +27,7 @@ const Deposit = () => {
     const isDepositing = useSelector(state => state.dBank.depositing.isDepositing);
     const isDepositSuccess = useSelector(state => state.dBank.depositing.isSuccess);
     const transactionHash = useSelector(state => state.dBank.depositing.transactionHash);
+    const isX402Deposit = useSelector(state => state.dBank.depositing.isX402Deposit);
     const chainId = useSelector(state => state.provider.chainId);
     
     const provider = useSelector(state => state.provider.connection);
@@ -328,7 +329,7 @@ const Deposit = () => {
 
             {isDepositing ? (
                 <Alert
-                    message={useX402 ? 'Deposit with x402 Pending...' : 'Deposit Pending...'}
+                    message={isX402Deposit ? 'Deposit with x402 Pending...' : 'Deposit Pending...'}
                     transactionHash={null}
                     variant={'info'}
                     setShowAlert={setShowAlert}
@@ -336,7 +337,7 @@ const Deposit = () => {
                 />
             ) : isDepositSuccess && showAlert ? (
                 <Alert
-                    message={useX402 ? 'Deposit with x402 Successful' : 'Deposit Successful'}
+                    message={isX402Deposit ? 'Deposit with x402 Successful' : 'Deposit Successful'}
                     transactionHash={transactionHash}
                     variant={'success'}
                     setShowAlert={setShowAlert}
@@ -344,7 +345,7 @@ const Deposit = () => {
                 />
             ) : !isDepositSuccess && showAlert ? (
                 <Alert
-                    message={useX402 ? 'Deposit with x402 Failed' : 'Deposit Failed'}
+                    message={isX402Deposit ? 'Deposit with x402 Failed' : 'Deposit Failed'}
                     transactionHash={null}
                     variant={'danger'}
                     setShowAlert={setShowAlert}

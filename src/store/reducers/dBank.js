@@ -12,6 +12,7 @@ export const dBank = createSlice({
             isDepositing: false,
             isSuccess: false,
             transactionHash: null,
+            isX402Deposit: false,
         },
         withdrawing: {
             isWithdrawing: false,
@@ -39,22 +40,35 @@ export const dBank = createSlice({
             state.depositing.isDepositing = true;
             state.depositing.isSuccess = false;
             state.depositing.transactionHash = null;
+            state.depositing.isX402Deposit = action.payload?.isX402 || false;
         },
         depositApproveSuccess: (state, action) => {
             // Approval done, keep depositing flag true to continue with deposit
             state.depositing.isDepositing = true;
             state.depositing.isSuccess = true;
-            state.depositing.transactionHash = action.payload || null;
+            // Handle both object format {hash: ...} and direct hash/null
+            state.depositing.transactionHash = typeof action.payload === 'object' && action.payload?.hash 
+                ? action.payload.hash 
+                : action.payload || null;
+            // Keep isX402Deposit state
         },
         depositSuccess: (state, action) => {
             state.depositing.isDepositing = false;
             state.depositing.isSuccess = true;
-            state.depositing.transactionHash = action.payload;
+            // Handle both object format {hash: ..., isX402: ...} and direct hash
+            if (typeof action.payload === 'object' && action.payload?.hash) {
+                state.depositing.transactionHash = action.payload.hash;
+                state.depositing.isX402Deposit = action.payload.isX402 || false;
+            } else {
+                state.depositing.transactionHash = action.payload;
+                // Keep isX402Deposit state (don't reset it)
+            }
         },
         depositFail: (state, action) => {
             state.depositing.isDepositing = false;
             state.depositing.isSuccess = false;
             state.depositing.transactionHash = null;
+            state.depositing.isX402Deposit = false;
         },  
         withdrawRequest: (state, action) => {
             state.withdrawing.isWithdrawing = true;

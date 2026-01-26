@@ -7,7 +7,8 @@ import { ethers } from 'ethers';
 import Alert from './Alert'
 
 import {
-    withdrawFunds,    
+    withdrawFunds,
+    loadBalances,
 } from '../store/interactions';
 
 import { useSelector, useDispatch } from 'react-redux';
@@ -63,6 +64,20 @@ const Withdraw = () => {
 
     // Calculate available shares for withdrawal (block if allocated)
     const [availableShares, setAvailableShares] = useState(shares || "0");
+    
+    // Refresh balances when component mounts or when account/shares change
+    useEffect(() => {
+        const refreshBalances = async () => {
+            if (dBank && tokens && account) {
+                try {
+                    await loadBalances(dBank, tokens, account, dispatch);
+                } catch (error) {
+                    console.error("Error refreshing balances in Withdraw:", error);
+                }
+            }
+        };
+        refreshBalances();
+    }, [account, dBank, tokens, dispatch]);
     
     useEffect(() => {
         const calculateAvailableShares = async () => {
