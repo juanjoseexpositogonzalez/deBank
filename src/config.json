@@ -18,19 +18,19 @@
   },
   "84532": {
     "token": {
-      "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+      "address": "0x1aA9Eb229B6E6bBb96D370BB219bb52f71b53811"
     },
     "dbank": {
-      "address": "0x53c7e1Cf2e0a7f9a210850660B3b27B711d973a2"
+      "address": "0xec4D1eFAA5fcf49118486e4C46EaeBAa39BF1daC"
     },
     "strategyRouter": {
-      "address": "0x931ca9e047cC9478349a44a5BAd19b82c6C114d0"
+      "address": "0x5a613b1103E57955C8712131620BD6750A1fc1f0"
     },
     "configManager": {
-      "address": "0x737E2af2FFfC4887E57260b9eebdd98d994f3265"
+      "address": "0xa2820dD3c1F22844f756d83424f8987d77E1BA58"
     },
     "mockS1": {
-      "address": "0x97F11C766DC0452b1aF6cbC522c00CE84e758345"
+      "address": "0x4d1faf455327C77d4F33081059aC7240474249bf"
     },
     "x402": {
       "facilitatorUrl": "http://localhost:4022",

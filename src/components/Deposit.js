@@ -276,19 +276,20 @@ const Deposit = () => {
                             <Form.Check
                                 type="switch"
                                 id="use-x402"
-                                label="Aportar con x402 (pago on-chain automático)"
+                                // label="Aportar con x402 (pago on-chain automático)"
+                                label="Deposit with x402 (automatic on-chain payment)"
                                 checked={useX402}
                                 onChange={(e) => setUseX402(e.target.checked)}
                                 disabled={x402Loading || isDepositing}
                             />
                             <Form.Text className="text-muted" style={{ fontSize: '0.85rem' }}>
-                                x402 permite pagos automáticos sin aprobaciones previas. Solo disponible en Base Sepolia.
+                                x402 allows automatic payments without prior approvals. Only available on Base Sepolia.
                             </Form.Text>
                         </Row>
                     ) : (chainId === 84532 || chainId === '84532') ? (
                         <Row className='my-3'>
                             <Form.Text className="text-warning" style={{ fontSize: '0.85rem' }}>
-                                ⚠️ x402 está disponible en Base Sepolia pero no está configurado. Verifica config.json.
+                                ⚠️ x402 is available on Base Sepolia but not configured. Verify config.json.
                             </Form.Text>
                         </Row>
                     ) : null}
@@ -302,15 +303,15 @@ const Deposit = () => {
                               {(isDepositing || x402Loading) && !isDepositSuccess ? (
                                 <>
                                   <Spinner as="span" animation="border" size="sm" className="me-2" />
-                                  {useX402 ? 'Procesando pago x402...' : 'Approving ...'}
+                                  {useX402 ? 'Processing x402 payment...' : 'Approving ...'}
                                 </>
                               ) : (isDepositing || x402Loading) && isDepositSuccess ? (
                                 <>
                                   <Spinner as="span" animation="border" size="sm" className="me-2" />
-                                  Depositing ...
+                                  Depositing with x402 ...
                                 </>
                               ) : (
-                                useX402 ? "Aportar con x402" : "Deposit"
+                                useX402 ? "Deposit with x402" : "Deposit"
                               )}
                         </Button>
                     </Row>
@@ -327,7 +328,7 @@ const Deposit = () => {
 
             {isDepositing ? (
                 <Alert
-                    message={'Deposit Pending...'}
+                    message={useX402 ? 'Deposit with x402 Pending...' : 'Deposit Pending...'}
                     transactionHash={null}
                     variant={'info'}
                     setShowAlert={setShowAlert}
@@ -335,7 +336,7 @@ const Deposit = () => {
                 />
             ) : isDepositSuccess && showAlert ? (
                 <Alert
-                    message={'Deposit Successful'}
+                    message={useX402 ? 'Deposit with x402 Successful' : 'Deposit Successful'}
                     transactionHash={transactionHash}
                     variant={'success'}
                     setShowAlert={setShowAlert}
@@ -343,17 +344,14 @@ const Deposit = () => {
                 />
             ) : !isDepositSuccess && showAlert ? (
                 <Alert
-                    message={'Deposit Failed'}
+                    message={useX402 ? 'Deposit with x402 Failed' : 'Deposit Failed'}
                     transactionHash={null}
                     variant={'danger'}
                     setShowAlert={setShowAlert}
-                    explorerBaseUrl={explorerBaseUrl}
-                />
-            ) : (
-                <></>
-            )}
+                    explorerBaseUrl={explorerBaseUrl} />
+            ) : <></>}
         </div>
     );
-}
+};
 
 export default Deposit;
