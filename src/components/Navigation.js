@@ -61,7 +61,11 @@ const Navigation = () => {
             '0x14a34': {
               chainId: '0x14a34',
               chainName: 'Base Sepolia',
-              rpcUrls: ['https://sepolia.base.org'],
+              rpcUrls: [
+                'https://base-sepolia.g.alchemy.com/v2/demo',
+                'https://sepolia.base.org',
+                'https://base-sepolia-rpc.publicnode.com'
+              ],
               nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
               blockExplorerUrls: ['https://sepolia.basescan.org']
             }

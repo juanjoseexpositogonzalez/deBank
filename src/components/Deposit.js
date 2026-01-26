@@ -169,9 +169,38 @@ const Deposit = () => {
                 setShowAlert(true);
                 
                 if (result && result.ok) {
+                    // Esperar un poco para que la transacción se confirme en la blockchain
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
                     // Recargar balances después de depósito exitoso
-                    if (dBank && tokens && account) {
-                        await loadBalances(dBank, tokens, account, dispatch);
+                    // Usar los contratos del estado Redux, o recargarlos si no están disponibles
+                    try {
+                        if (dBank && tokens && tokens.length > 0 && account) {
+                            await loadBalances(dBank, tokens, account, dispatch);
+                            console.log('Balances reloaded after x402 deposit');
+                        } else {
+                            // Si los contratos no están disponibles, intentar recargarlos
+                            console.warn('Contracts not available, attempting to reload...', {
+                                hasDBank: !!dBank,
+                                hasTokens: !!tokens,
+                                tokensLength: tokens?.length,
+                                hasAccount: !!account
+                            });
+                            
+                            // Recargar contratos y balances
+                            const { loadTokens, loadBank } = await import('../store/interactions');
+                            const freshTokens = await loadTokens(provider, chainId, dispatch);
+                            const freshDBank = await loadBank(provider, chainId, dispatch);
+                            
+                            if (freshDBank && freshTokens && freshTokens.length > 0 && account) {
+                                await loadBalances(freshDBank, freshTokens, account, dispatch);
+                                console.log('Balances reloaded after reloading contracts');
+                            }
+                        }
+                    } catch (balanceError) {
+                        console.error('Error reloading balances after x402 deposit:', balanceError);
+                        // No lanzar error, solo loguear - el depósito fue exitoso
+                        // El usuario puede recargar manualmente refrescando la página
                     }
                     setUsdcAmount("");
                     setSharesAmount("");
@@ -283,7 +312,7 @@ const Deposit = () => {
                                 onChange={(e) => setUseX402(e.target.checked)}
                                 disabled={x402Loading || isDepositing}
                             />
-                            <Form.Text className="text-muted" style={{ fontSize: '0.85rem' }}>
+                            <Form.Text style={{ fontSize: '0.85rem', color: '#6c757d', fontWeight: '400' }}>
                                 x402 allows automatic payments without prior approvals. Only available on Base Sepolia.
                             </Form.Text>
                         </Row>

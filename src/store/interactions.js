@@ -622,49 +622,78 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
 
         // Obtener signer del usuario
         const signer = await provider.getSigner();
+        const signerAddress = await signer.getAddress();
         
-        // Crear cuenta viem desde el signer de ethers
-        // @x402/evm requiere un signer compatible con viem
+        // Crear cuenta viem desde el signer de ethers usando un adaptador
+        // Esto funciona con MetaMask y otros wallets sin necesidad de private key
         let viemAccount;
         try {
-            const { privateKeyToAccount } = await import('viem/accounts');
-            
-            // Intentar obtener private key del signer
-            // Nota: Esto solo funciona con algunos tipos de providers (ej: JsonRpcProvider con private key)
-            // Para MetaMask y otros wallets, el usuario debe firmar manualmente
+            // Intentar primero con private key (para desarrollo local con Hardhat)
             let privateKey;
-            
-            // Método 1: Si el signer tiene getPrivateKey
             if (signer.getPrivateKey) {
                 try {
                     privateKey = await signer.getPrivateKey();
                 } catch (e) {
-                    console.warn('getPrivateKey not available:', e.message);
+                    // No disponible, continuar con adaptador
                 }
             }
             
-            // Método 2: Si el provider tiene acceso a la private key
-            if (!privateKey && provider.connection && provider.connection.url) {
-                // Para desarrollo local con Hardhat, la private key puede estar en el provider
-                // Esto es solo para testing
+            if (privateKey) {
+                // Desarrollo local: usar private key directamente
+                const { privateKeyToAccount } = await import('viem/accounts');
+                viemAccount = privateKeyToAccount(privateKey);
+            } else {
+                // Producción/MetaMask: crear adaptador que envuelve el signer de ethers
+                const { toAccount } = await import('viem/accounts');
+                
+                viemAccount = toAccount({
+                    address: signerAddress,
+                    async signMessage({ message }) {
+                        // Firmar mensaje usando ethers signer
+                        const signature = await signer.signMessage(message);
+                        return signature;
+                    },
+                    async signTypedData(typedData) {
+                        // Firmar datos tipados (EIP-712) usando ethers signer
+                        const domain = typedData.domain;
+                        const types = typedData.types;
+                        const value = typedData.message;
+                        
+                        // Convertir formato viem a formato ethers
+                        const ethersTypedData = {
+                            domain: {
+                                name: domain.name,
+                                version: domain.version,
+                                chainId: domain.chainId ? Number(domain.chainId) : undefined,
+                                verifyingContract: domain.verifyingContract,
+                                salt: domain.salt,
+                            },
+                            types: types,
+                            primaryType: typedData.primaryType,
+                            message: value,
+                        };
+                        
+                        // Remover campos undefined
+                        Object.keys(ethersTypedData.domain).forEach(key => {
+                            if (ethersTypedData.domain[key] === undefined) {
+                                delete ethersTypedData.domain[key];
+                            }
+                        });
+                        
+                        const signature = await signer._signTypedData(
+                            ethersTypedData.domain,
+                            ethersTypedData.types,
+                            ethersTypedData.message
+                        );
+                        return signature;
+                    },
+                });
             }
-            
-            if (!privateKey) {
-                // Para producción con MetaMask u otros wallets, necesitamos usar un enfoque diferente
-                // Por ahora, lanzamos un error informativo
-                throw new Error(
-                    'x402 requires direct wallet access. ' +
-                    'Please ensure your wallet is connected and supports EIP-3009 signing. ' +
-                    'For development, use a local Hardhat account.'
-                );
-            }
-            
-            viemAccount = privateKeyToAccount(privateKey);
         } catch (accountError) {
             console.error('Failed to create viem account:', accountError);
             throw new Error(
                 `Failed to create x402 signer: ${accountError.message}. ` +
-                'Make sure your wallet supports EIP-3009 signing or use a development account.'
+                'Make sure your wallet supports EIP-3009 signing (EIP-712 typed data signing).'
             );
         }
 
@@ -708,10 +737,27 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
             
             // Si es 402, el cliente debería haber manejado el pago
             if (response.status === 402) {
-                throw new Error('Payment required but x402 client failed to process payment. Please check your wallet connection.');
+                throw new Error('Payment required but x402 client failed to process payment. Please check your wallet connection and ensure you have sufficient balance.');
             }
             
-            throw new Error(errorData.error || `Deposit failed: ${response.status} ${response.statusText}`);
+            // Mejorar mensajes de error según el código de estado
+            let errorMessage = errorData.error || `Deposit failed: ${response.status} ${response.statusText}`;
+            
+            // Mensajes más descriptivos según el código de estado
+            if (response.status === 400) {
+                errorMessage = errorData.error || 'Invalid deposit request. Please check the amount and try again.';
+            } else if (response.status === 500) {
+                errorMessage = errorData.error || 'Server error. Please try again later or contact support.';
+            }
+            
+            console.error('x402 deposit error details:', {
+                status: response.status,
+                statusText: response.statusText,
+                errorData,
+                errorText
+            });
+            
+            throw new Error(errorMessage);
         }
 
         const result = await response.json();
@@ -724,10 +770,14 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
         dispatch(depositSuccess({ hash: result.txHash, isX402: true }));
         
         console.log('x402 deposit successful:', result);
+        
+        // Esperar un poco para que la transacción se confirme antes de retornar
+        // Esto ayuda a que loadBalances obtenga los valores actualizados
+        await new Promise(resolve => setTimeout(resolve, 1500));
 
         return { 
             ok: true, 
-            txHash: result.txHash, 
+            txHash: result.txHash,
             shares: result.shares 
         };
     } catch (error) {

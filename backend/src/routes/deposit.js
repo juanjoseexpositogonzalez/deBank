@@ -4,7 +4,7 @@ const { processDeposit } = require('../services/payment');
 const { validateDepositRequest } = require('../utils/validation');
 const logger = require('../utils/logger');
 
-router.post('/', async (req, res) => {
+router.post('/deposit', async (req, res) => {
   try {
     const { amount, userAddress, requestId } = req.body;
     const paymentSignature = req.headers['payment-signature'] || req.headers['payment-signature'];
