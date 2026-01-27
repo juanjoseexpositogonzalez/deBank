@@ -385,7 +385,7 @@ const Deposit = () => {
                               ) : (isDepositing || x402Loading) && isDepositSuccess ? (
                                 <>
                                   <Spinner as="span" animation="border" size="sm" className="me-2" />
-                                  Depositing with x402 ...
+                                  {useX402 ? 'Depositing with x402 ...' : 'Depositing ...'}
                                 </>
                               ) : (
                                 useX402 ? "Deposit with x402" : "Deposit"
