@@ -22,6 +22,7 @@ import {
   loadConfigManager,
   loadBalances,
   loadUserStrategyAllocations,
+  loadChartData,
 } from '../store/interactions'
 import { setAccount } from '../store/reducers/provider'
 
@@ -69,6 +70,8 @@ function App() {
           if (strategyRouterContract) {
             await loadUserStrategyAllocations(strategyRouterContract, currentAccount, dispatch);
           }
+          // Load chart data
+          await loadChartData(nextProvider, nextDBank, strategyRouterContract, currentAccount, dispatch);
         }
       } catch (error) {
         console.error('Error handling chain change:', error);
@@ -100,6 +103,8 @@ function App() {
             if (strategyRouterContract) {
               await loadUserStrategyAllocations(strategyRouterContract, newAccount, dispatch);
             }
+            // Load chart data
+            await loadChartData(freshProvider, freshDBank, strategyRouterContract, newAccount, dispatch);
           }
         } catch (error) {
           console.error('Error loading balances after account change:', error);
@@ -142,6 +147,8 @@ function App() {
           if (strategyRouterContract) {
             await loadUserStrategyAllocations(strategyRouterContract, currentAccount, dispatch);
           }
+          // Load chart data
+          await loadChartData(provider, dBankContract, strategyRouterContract, currentAccount, dispatch);
         }
       } catch (error) {
         console.error('Error loading blockchain data:', error);

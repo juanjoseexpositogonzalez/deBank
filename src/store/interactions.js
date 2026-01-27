@@ -76,6 +76,16 @@ import {
     setConfigManagerAllowedVenues,
 } from './reducers/configManager';
 
+import {
+    setChartsLoading,
+    addPricePerSharePoint,
+    addUserSharesValuePoint,
+    setCurrentPricePerShare,
+    setCurrentUserSharesValue,
+    setLastBlockTimestamp,
+    clearUserChartData,
+} from './reducers/charts';
+
 import TOKEN_ABI_RAW from '../abis/Token.json'
 import DBANK_ABI_RAW from '../abis/dBank.json'
 import STRATEGY_ROUTER_ABI_RAW from '../abis/StrategyRouter.json'
@@ -1076,5 +1086,146 @@ export const loadStrategyReturns = async (provider, strategyRouter, dispatch) =>
         // dispatch(setStrategyReturns(returns));
     } catch (error) {
         console.error("loadStrategyReturns error:", error);
+    }
+}
+
+// ----------------------------------------------------------
+// LOAD CHART DATA
+// Calculates current values and adds points to chart history
+export const loadChartData = async (provider, dBank, strategyRouter, account, dispatch) => {
+    if (!provider || !dBank) {
+        return;
+    }
+
+    try {
+        dispatch(setChartsLoading(true));
+
+        // Get current block timestamp
+        const currentBlock = await provider.getBlock('latest');
+        const currentTimestamp = currentBlock.timestamp * 1000; // Convert to milliseconds
+        dispatch(setLastBlockTimestamp(currentTimestamp));
+
+        // Get vault state
+        const totalAssets = await dBank.totalAssets();
+        const totalSupply = await dBank.totalSupply();
+
+        // Calculate vault price per share
+        let vaultPricePerShare = 1;
+        if (totalSupply.gt(0)) {
+            const totalAssetsNum = parseFloat(ethers.utils.formatUnits(totalAssets, 18));
+            const totalSupplyNum = parseFloat(ethers.utils.formatUnits(totalSupply, 18));
+            vaultPricePerShare = totalAssetsNum / totalSupplyNum;
+        }
+
+        // If no account, only track vault-level price per share
+        if (!account) {
+            dispatch(setCurrentPricePerShare(vaultPricePerShare.toString()));
+            dispatch(addPricePerSharePoint({ x: currentTimestamp, y: vaultPricePerShare }));
+            dispatch(clearUserChartData());
+            dispatch(setChartsLoading(false));
+            return;
+        }
+
+        // Get user shares in vault
+        const userSharesBN = await dBank.balanceOf(account);
+        const userShares = parseFloat(ethers.utils.formatUnits(userSharesBN, 18));
+
+        // Value of user's shares in the vault (without considering strategy allocations)
+        const userVaultValue = userShares * vaultPricePerShare;
+
+        // Now calculate strategy allocations value
+        let allocatedPrincipal = 0;
+        let allocatedValue = 0;
+
+        if (strategyRouter) {
+            try {
+                // Get total strategies
+                const totalStrategiesBN = await strategyRouter.totalStrategies();
+                const totalStrategies = totalStrategiesBN.toNumber();
+
+                // Iterate through strategies to get user allocations
+                for (let i = 1; i <= totalStrategies; i++) {
+                    try {
+                        const allocationBN = await strategyRouter.getUserStrategyAllocation(account, i);
+                        if (allocationBN.gt(0)) {
+                            const allocation = parseFloat(ethers.utils.formatUnits(allocationBN, 18));
+                            allocatedPrincipal += allocation;
+
+                            // Get current value of this allocation
+                            const [strategyAddr, , , strategyAllocatedBN] = await strategyRouter.getStrategy(i);
+                            
+                            if (strategyAddr && strategyAddr !== ethers.constants.AddressZero && strategyAllocatedBN.gt(0)) {
+                                try {
+                                    const strategy = new ethers.Contract(
+                                        strategyAddr,
+                                        ["function totalAssets() view returns (uint256)"],
+                                        provider
+                                    );
+                                    const strategyTotalAssetsBN = await strategy.totalAssets();
+                                    
+                                    // User's share of strategy = (userAllocation / strategyAllocated) * strategyTotalAssets
+                                    const allocationValueBN = allocationBN.mul(strategyTotalAssetsBN).div(strategyAllocatedBN);
+                                    allocatedValue += parseFloat(ethers.utils.formatUnits(allocationValueBN, 18));
+                                } catch (strategyError) {
+                                    // If can't get strategy value, use principal as fallback
+                                    allocatedValue += allocation;
+                                }
+                            } else {
+                                allocatedValue += allocation;
+                            }
+                        }
+                    } catch (allocError) {
+                        // Strategy might not exist, continue
+                    }
+                }
+            } catch (routerError) {
+                console.warn('Error loading strategy allocations for charts:', routerError.message);
+            }
+        }
+
+        // Calculate total user value
+        // userVaultValue already includes all shares (allocated and unallocated) at vault PPS
+        // But allocated shares have additional yield from strategies
+        // 
+        // Correct calculation:
+        // - Unallocated shares value = (userShares - allocatedPrincipal) * vaultPricePerShare
+        // - Allocated shares value = allocatedValue (which includes yield)
+        // - Total = unallocatedValue + allocatedValue
+        
+        const unallocatedShares = Math.max(userShares - allocatedPrincipal, 0);
+        const unallocatedValue = unallocatedShares * vaultPricePerShare;
+        const totalUserValue = unallocatedValue + allocatedValue;
+
+        // Calculate effective price per share for this user
+        // This represents what 1 share is "worth" considering their allocation mix
+        const effectivePricePerShare = userShares > 0 
+            ? totalUserValue / userShares 
+            : vaultPricePerShare;
+
+        // Debug logging
+        console.log('loadChartData:', {
+            timestamp: new Date(currentTimestamp).toISOString(),
+            vaultPPS: vaultPricePerShare.toFixed(6),
+            userShares: userShares.toFixed(4),
+            allocatedPrincipal: allocatedPrincipal.toFixed(4),
+            allocatedValue: allocatedValue.toFixed(4),
+            unallocatedShares: unallocatedShares.toFixed(4),
+            unallocatedValue: unallocatedValue.toFixed(4),
+            totalUserValue: totalUserValue.toFixed(4),
+            effectivePPS: effectivePricePerShare.toFixed(6),
+        });
+
+        // Dispatch current values
+        dispatch(setCurrentPricePerShare(effectivePricePerShare.toString()));
+        dispatch(setCurrentUserSharesValue(totalUserValue.toString()));
+
+        // Add points to history
+        dispatch(addPricePerSharePoint({ x: currentTimestamp, y: effectivePricePerShare }));
+        dispatch(addUserSharesValuePoint({ x: currentTimestamp, y: totalUserValue }));
+
+    } catch (error) {
+        console.error('loadChartData error:', error);
+    } finally {
+        dispatch(setChartsLoading(false));
     }
 }
