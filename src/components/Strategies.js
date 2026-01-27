@@ -484,10 +484,16 @@ const Strategies = () => {
           <Table bordered size="sm" responsive style={{ backgroundColor: 'transparent', color: '#f8f9fa' }}>
             <thead style={{ backgroundColor: 'transparent' }}>
               <tr style={{ backgroundColor: 'transparent' }}>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', width: '30%' }}>Strategy</th>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>Allocated (principal)</th>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{symbols && symbols[0] ? symbols[0] : 'USDC'} (value)</th>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '30%' }}>% of your total value</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent' }}>Strategy</th>
+                <th className="d-none d-md-table-cell" style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center' }}>Principal</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center' }}>
+                  <span className="d-none d-md-inline">{symbols && symbols[0] ? symbols[0] : 'USDC'} (value)</span>
+                  <span className="d-md-none">Value</span>
+                </th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center' }}>
+                  <span className="d-none d-md-inline">% of total</span>
+                  <span className="d-md-none">%</span>
+                </th>
               </tr>
             </thead>
             <tbody style={{ backgroundColor: 'transparent' }}>
@@ -507,10 +513,13 @@ const Strategies = () => {
                 const pctStr = formatWithMaxDecimals(pctClamped.toString(), 2);
                 return (
                   <tr key={s.id || idx} style={{ backgroundColor: 'transparent' }}>
-                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', width: '30%' }}>{`Strategy ${s.id}`}</td>
-                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{allocPrincipalFormatted}</td>
-                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{allocUsd}</td>
-                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'right', width: '30%' }}>{pctStr}%</td>
+                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent' }}>
+                      <span className="d-none d-md-inline">{`Strategy ${s.id}`}</span>
+                      <span className="d-md-none">{`S${s.id}`}</span>
+                    </td>
+                    <td className="d-none d-md-table-cell" style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center' }}>{allocPrincipalFormatted}</td>
+                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center' }}>{allocUsd}</td>
+                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'right' }}>{pctStr}%</td>
                   </tr>
                 );
               })}

@@ -1,6 +1,17 @@
+import { useEffect } from 'react';
 import { Alert as BootstrapAlert } from 'react-bootstrap';
 
-const Alert = ({ message, transactionHash, variant, setShowAlert, explorerBaseUrl }) => {
+const Alert = ({ message, transactionHash, variant, setShowAlert, explorerBaseUrl, autoClose = true, autoCloseDelay = 5000 }) => {
+  // Auto-close success alerts after delay
+  useEffect(() => {
+    if (variant === 'success' && autoClose) {
+      const timer = setTimeout(() => {
+        setShowAlert(false);
+      }, autoCloseDelay);
+      return () => clearTimeout(timer);
+    }
+  }, [variant, autoClose, autoCloseDelay, setShowAlert]);
+
   // Custom styles for success variant - more subtle and professional
   const successStyles = variant === 'success' ? {
     backgroundColor: '#1a3d2e',

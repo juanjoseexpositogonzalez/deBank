@@ -88,7 +88,7 @@ const Navigation = () => {
 
  
   return (
-    <Navbar className='my-3'>
+    <Navbar expand="lg" className='my-3'>
       <img
         alt="logo"
         src={logo}
@@ -99,7 +99,7 @@ const Navigation = () => {
       <Navbar.Brand href="#">dBank</Navbar.Brand>
       
       <Navbar.Toggle aria-controls="nav" />
-      <Navbar.Collapse id="nav"className="justify-content-end">
+      <Navbar.Collapse id="nav" className="justify-content-end">
 
         <div className="d-flex justify-content-end mt-3">
           

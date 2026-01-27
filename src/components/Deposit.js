@@ -12,9 +12,10 @@ import {
     loadBalances,
 } from '../store/interactions';
 import { isX402Available } from '../utils/x402Config';
+import { formatWithMaxDecimals, getExplorerUrl } from '../utils/format';
 
 import { useSelector, useDispatch } from 'react-redux';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 
 const Deposit = () => {
@@ -23,6 +24,9 @@ const Deposit = () => {
     const [showAlert, setShowAlert] = useState(false);
     const [useX402, setUseX402] = useState(false);
     const [x402Loading, setX402Loading] = useState(false);
+    
+    // Ref for debouncing conversion calls
+    const conversionTimeoutRef = useRef(null);
 
     const isDepositing = useSelector(state => state.dBank.depositing.isDepositing);
     const isDepositSuccess = useSelector(state => state.dBank.depositing.isSuccess);
@@ -64,36 +68,14 @@ const Deposit = () => {
         }
     }, [isDepositSuccess, dBank, tokens, account, dispatch]);
 
-    // Helper function to format numbers with max 4 decimals
-    const formatWithMaxDecimals = (value, maxDecimals = 4) => {
-        if (!value || value === "0" || parseFloat(value) === 0) return "0";
-        const num = parseFloat(value);
-        if (isNaN(num)) return "0";
-        
-        // If number has no decimals or very few, show as is
-        const str = num.toString();
-        const [, decimals] = str.split('.');
-        if (!decimals || decimals.length <= maxDecimals) {
-            return num.toString();
-        }
-        
-        // Otherwise, limit to maxDecimals
-        return num.toFixed(maxDecimals).replace(/\.?0+$/, '');
-    };
-
-    const explorerMap = {
-        1: 'https://etherscan.io/tx/',
-        11155111: 'https://sepolia.etherscan.io/tx/',
-        84532: 'https://sepolia.basescan.org/tx/',
-        31337: '' // no public explorer for local
-    };
-    const explorerBaseUrl = explorerMap[chainId] || '';
+    const explorerBaseUrl = getExplorerUrl(chainId);
     
     // Verificar si x402 está disponible
     const x402Available = isX402Available(chainId);
 
     const amountHandler = async (e) => {
         const value = e.target.value;
+        const inputId = e.target.id;
 
         // Handle empty input
         if (!value || value === "") {
@@ -101,30 +83,39 @@ const Deposit = () => {
             setSharesAmount("");
             return;
         }
-        try {
-            if (e.target.id === 'usdc') {
-                setUsdcAmount(e.target.value);
-    
-                // Fetch value from chain in USD
-                const amountInWei = ethers.utils.parseUnits(e.target.value || "0", 18);
-                const sharesInWei = await dBank.convertToShares(amountInWei);
-                const sharesFormatted = ethers.utils.formatUnits(sharesInWei, 18);
-                // Set shares
-                setSharesAmount(sharesFormatted);
-            } else {
-                setSharesAmount(e.target.value);
-    
-                // Convert shares to assets (both in wei)
-                const sharesInWei = ethers.utils.parseUnits(e.target.value || "0", 18);
-                const assetsInWei = await dBank.convertToAssets(sharesInWei);
-                const assetsFormatted = ethers.utils.formatUnits(assetsInWei, 18);
-                // Set usdc
-                setUsdcAmount(assetsFormatted);
-            }
-        } catch (error) {
-            console.error("Conversion error:", error);
+
+        // Set the input value immediately for responsive UI
+        if (inputId === 'usdc') {
+            setUsdcAmount(value);
+        } else {
+            setSharesAmount(value);
         }
-        
+
+        // Clear previous timeout
+        if (conversionTimeoutRef.current) {
+            clearTimeout(conversionTimeoutRef.current);
+        }
+
+        // Debounce the contract call (300ms delay)
+        conversionTimeoutRef.current = setTimeout(async () => {
+            try {
+                if (inputId === 'usdc') {
+                    // Fetch value from chain in USD
+                    const amountInWei = ethers.utils.parseUnits(value || "0", 18);
+                    const sharesInWei = await dBank.convertToShares(amountInWei);
+                    const sharesFormatted = ethers.utils.formatUnits(sharesInWei, 18);
+                    setSharesAmount(sharesFormatted);
+                } else {
+                    // Convert shares to assets (both in wei)
+                    const sharesInWei = ethers.utils.parseUnits(value || "0", 18);
+                    const assetsInWei = await dBank.convertToAssets(sharesInWei);
+                    const assetsFormatted = ethers.utils.formatUnits(assetsInWei, 18);
+                    setUsdcAmount(assetsFormatted);
+                }
+            } catch (error) {
+                console.error("Conversion error:", error);
+            }
+        }, 300);
     }
 
     const maxHandlerBalance = async () => {
@@ -297,7 +288,7 @@ const Deposit = () => {
                                 </span>
                             )}
                         </Form.Text>
-                        <InputGroup>
+                        <InputGroup hasValidation>
                             <Form.Control 
                               type='number' 
                               placeholder='0.0' 
@@ -306,11 +297,14 @@ const Deposit = () => {
                               id="usdc"
                               onChange={(e) => amountHandler(e)}
                               value={usdcAmount === 0 ? "" : usdcAmount}
+                              isInvalid={usdcAmount && balances && balances[0] && parseFloat(usdcAmount) > parseFloat(balances[0])}
                             />
                           <InputGroup.Text style={{ width: "100px" }} className="justify-content-center">
                              {symbols && symbols[0]}
                           </InputGroup.Text>
-
+                          <Form.Control.Feedback type="invalid">
+                            Amount exceeds available balance
+                          </Form.Control.Feedback>
                         </InputGroup>
                     </Row>
 
