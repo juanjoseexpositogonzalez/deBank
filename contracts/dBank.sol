@@ -400,13 +400,28 @@ contract dBank {
         emit Transfer(_from, address(0), _amount);
     }
 
-    function _revertIfAllocatedShares(address _owner, uint256 /* _requestedShares */) internal view {
-        StrategyRouter router = StrategyRouter(strategyRouter);
-        uint256 userTotalAllocated = router.getUserTotalAllocated(_owner);
-        if (userTotalAllocated == 0) return;
-
-        uint256 allocatedShares = this.convertToShares(userTotalAllocated);
-        revert dBank__SharesAllocated(allocatedShares);
+    /**
+     * @notice This function was removed because it contained a bug.
+     * 
+     * THE BUG: The function assumed that tokens allocated to strategies via 
+     * StrategyRouter came from the dBank vault, but they actually come from 
+     * the user's wallet (see StrategyRouter.depositToStrategy line 302:
+     * token.transferFrom(msg.sender, address(this), _amount)).
+     * 
+     * This caused users to be unable to withdraw their dBank deposits even 
+     * though their strategy allocations were completely separate.
+     * 
+     * SOLUTION: Removed the check entirely. The dBank vault and strategy 
+     * allocations are independent systems. Users can withdraw their full 
+     * vault balance regardless of their strategy allocations.
+     * 
+     * If in the future we want to link vault shares with strategy allocations,
+     * the StrategyRouter.depositToStrategy function should withdraw tokens 
+     * from dBank (burning shares) instead of from the user's wallet directly.
+     */
+    function _revertIfAllocatedShares(address /* _owner */, uint256 /* _requestedShares */) internal pure {
+        // No-op: Strategy allocations don't affect vault withdrawals
+        // See comment above for explanation of the bug that was fixed
     }
 
     //===========================================================
