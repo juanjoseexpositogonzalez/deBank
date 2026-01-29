@@ -51,7 +51,7 @@ const Strategies = () => {
   const userShares = useSelector(state => state.dBank.shares) || "0";
   const [userSharesOnChain, setUserSharesOnChain] = useState(null);
   const [allocationSharesByStrategy, setAllocationSharesByStrategy] = useState([]);
-  const [, setPricePerShare] = useState("0"); // Used internally for calculations
+  const [vaultPricePerShare, setVaultPricePerShare] = useState("1"); // PPS del vault para mostrar cuando user no tiene shares
   const userSharesStr = useMemo(() => {
     if (!userShares) return '0';
     if (Array.isArray(userShares)) return '0';
@@ -122,8 +122,14 @@ const Strategies = () => {
 
   const effectivePps = useMemo(() => {
     const totalShares = parseFloat(displaySharesStr || "0");
-    return totalShares > 0 ? totalValue / totalShares : 1;
-  }, [displaySharesStr, totalValue]);
+    // Si el usuario tiene shares, calcular PPS efectivo basado en su valor total
+    // Si no tiene shares, usar el PPS del vault para mostrar el valor correcto
+    if (totalShares > 0) {
+      return totalValue / totalShares;
+    }
+    // Usar PPS del vault cuando el usuario no tiene shares
+    return parseFloat(vaultPricePerShare) || 1;
+  }, [displaySharesStr, totalValue, vaultPricePerShare]);
 
   const maxAlloc = useMemo(() => {
     // For allocate: min(unallocated principal, remaining cap)
@@ -159,7 +165,7 @@ const Strategies = () => {
         if (!cancelled) {
           setUserSharesOnChain(null);
           setAllocationSharesByStrategy([]);
-          setPricePerShare("0");
+          setVaultPricePerShare("1");
         }
         return;
       }
@@ -171,7 +177,7 @@ const Strategies = () => {
         const totalSupply = parseFloat(ethers.utils.formatUnits(totalSupplyBN, 18));
         const pps = totalSupply > 0 ? totalAssets / totalSupply : 1;
         if (!cancelled) {
-          setPricePerShare(pps.toString());
+          setVaultPricePerShare(pps.toString());
         }
 
         const currentSharesBN = await dBank.balanceOf(account);

@@ -21,19 +21,26 @@
 ```
 src/
 ├── components/
-│   ├── App.js          (182 lineas) - Orquestacion principal
+│   ├── App.js          (190 lineas) - Orquestacion principal
 │   ├── Navigation.js   (131 lineas) - Navbar y wallet
 │   ├── Tabs.js         (22 lineas)  - Navegacion de tabs
-│   ├── Deposit.js      (303 lineas) - Formulario deposito
+│   ├── Deposit.js      (435 lineas) - Formulario deposito
 │   ├── Withdraw.js     (378 lineas) - Formulario retiro
 │   ├── Strategies.js   (522 lineas) - Gestion de estrategias
-│   ├── Charts.js       (713 lineas) - Graficos
+│   ├── Charts.js       (310 lineas) - Graficos (refactorizado)
 │   ├── Alert.js        (69 lineas)  - Notificaciones
 │   └── Loading.js      (12 lineas)  - Estado de carga
 ├── store/
 │   ├── store.js        - Configuracion Redux
-│   ├── interactions.js - Logica de contratos
-│   └── reducers/       - Redux slices
+│   ├── interactions.js - Logica de contratos + loadChartData()
+│   └── reducers/
+│       ├── provider.js
+│       ├── tokens.js
+│       ├── dBank.js
+│       ├── strategyRouter.js
+│       ├── mockS1.js
+│       ├── configManager.js
+│       └── charts.js   - NUEVO: Estado centralizado para graficos
 └── abis/               - ABIs de contratos
 ```
 
@@ -502,36 +509,30 @@ export const selectStrategies = createSelector(
 const strategies = useSelector(selectStrategies);
 ```
 
-### 5.2 Dependencias de useEffect Incorrectas (MEDIO)
+### 5.2 Dependencias de useEffect Incorrectas (MEDIO) - RESUELTO
 
-**Ubicacion:** `Charts.js:100-233`
+**Ubicacion:** `Charts.js`
 
-**Problema:**
-```jsx
-// eslint-disable-next-line react-hooks/exhaustive-deps
-useEffect(() => {
-    loadChartData();
-    const interval = setInterval(loadChartData, 30000);
-    return () => clearInterval(interval);
-}, [dBank, provider, account]);
-```
+**Estado:** ✅ ARREGLADO en PR #6
 
-El comentario `eslint-disable` sugiere que hay dependencias faltantes.
-
-**Solucion:**
-Usar `useCallback` para `loadChartData` y incluirlo como dependencia:
+**Solucion implementada:**
+Se refactorizo Charts.js para usar `useCallback` correctamente:
 
 ```jsx
-const loadChartData = useCallback(async () => {
-    // ...
-}, [dBank, provider, account, dispatch]);
+const refreshChartData = useCallback(async () => {
+    if (provider && dBank) {
+        await loadChartData(provider, dBank, strategyRouter, account, dispatch);
+    }
+}, [provider, dBank, strategyRouter, account, dispatch]);
 
 useEffect(() => {
-    loadChartData();
-    const interval = setInterval(loadChartData, 30000);
+    refreshChartData();
+    const interval = setInterval(refreshChartData, 5000);
     return () => clearInterval(interval);
-}, [loadChartData]);
+}, [refreshChartData]);
 ```
+
+La logica de carga de datos se movio a `loadChartData()` en `interactions.js` y el estado se centralizo en el nuevo reducer `charts.js`.
 
 ### 5.3 Llamadas a Contratos en Handlers de Eventos (MEDIO)
 
@@ -574,52 +575,46 @@ const amountHandler = (e) => {
 
 ## 6. Problemas de Rendimiento
 
-### 6.1 Re-renders Innecesarios en Charts.js (ALTO)
+### 6.1 Re-renders Innecesarios en Charts.js (ALTO) - RESUELTO
 
 **Ubicacion:** `Charts.js`
 
-**Problema:**
-El componente tiene 713 lineas con muchos `useMemo` y `useEffect`, pero aun asi puede re-renderizar excesivamente porque:
+**Estado:** ✅ ARREGLADO en PR #6
 
-1. `historicalData` es un objeto nuevo en cada setState
-2. Multiples useEffects que se disparan en cascada
-3. ApexCharts re-renderiza con cada cambio de options
+**Solucion implementada:**
+Se refactorizo completamente Charts.js:
 
-**Solucion:**
-1. Separar en sub-componentes (AllocationPieChart, PriceLineChart, etc.)
-2. Usar `React.memo` en charts individuales
-3. Memoizar options de ApexCharts correctamente
+1. **Reducido de ~713 a ~310 lineas** - Logica movida a Redux
+2. **Nuevo reducer `charts.js`** - Estado centralizado para historico
+3. **Nueva funcion `loadChartData()`** - En interactions.js con calculo correcto
+4. **Eliminados useEffects en cascada** - Solo un useEffect simple con useCallback
 
-```jsx
-const PriceLineChart = React.memo(({ data, options }) => (
-    <Chart options={options} series={data} type="line" height={300} />
-));
-```
+El componente ahora solo lee de Redux y renderiza, eliminando la complejidad que causaba re-renders.
 
-### 6.2 LocalStorage Accedido Sincronamente (BAJO)
+### 6.2 LocalStorage Accedido Sincronamente (BAJO) - RESUELTO
 
-**Ubicacion:** `Charts.js:323-338`
+**Ubicacion:** `Charts.js`
 
-**Problema:**
-```jsx
-const getHistoricalData = (key) => {
-    const data = localStorage.getItem(`dBank_${key}`);
-    return data ? JSON.parse(data) : [];
-};
-```
+**Estado:** ✅ ARREGLADO en PR #6
 
-`JSON.parse` es sincrono y puede bloquear el main thread con datos grandes.
-
-**Solucion:**
-Para datos grandes, considerar IndexedDB con una libreria como `idb-keyval`:
+**Solucion implementada:**
+El historico de graficos ya no usa localStorage. Ahora se almacena en Redux:
 
 ```jsx
-import { get, set } from 'idb-keyval';
-
-const getHistoricalData = async (key) => {
-    return await get(`dBank_${key}`) || [];
-};
+// Nuevo reducer charts.js
+initialState: {
+    pricePerShareHistory: [],      // Array de { x: timestamp, y: value }
+    userSharesValueHistory: [],    // Array de { x: timestamp, y: value }
+    currentPricePerShare: "1",
+    currentUserSharesValue: "0",
+    lastBlockTimestamp: null,
+}
 ```
+
+Beneficios:
+- Sin acceso sincrono a localStorage
+- Estado consistente con el resto de la app
+- Mas facil de debuggear con Redux DevTools
 
 ---
 
@@ -680,14 +675,23 @@ style={{ color: '#adb5bd' }} // Gris claro sobre fondo oscuro
 8. **Mensajes consistentes** - Centralizar strings
 9. **Validacion visual** - isInvalid en Form.Control
 10. **Memoizar selectores** - Reselect
-11. **Fix dependencias useEffect** - Eliminar eslint-disable
+11. ~~**Fix dependencias useEffect** - Eliminar eslint-disable~~ ✅ RESUELTO
 
 ### Baja Prioridad
 
 12. **Auto-cerrar alertas de exito**
 13. **Accesibilidad** - aria-labels
-14. **Separar Charts.js** - Sub-componentes
-15. **IndexedDB** - Para datos grandes
+14. ~~**Separar Charts.js** - Sub-componentes~~ ✅ RESUELTO (refactorizado a Redux)
+15. ~~**IndexedDB** - Para datos grandes~~ ✅ RESUELTO (usa Redux)
+
+### Resueltos en PR #6
+
+- ✅ Charts.js refactorizado de ~713 a ~310 lineas
+- ✅ Nuevo reducer `charts.js` para estado centralizado
+- ✅ Calculo correcto del valor de shares (antes mezclaba shares con tokens)
+- ✅ Dependencias useEffect corregidas con useCallback
+- ✅ Eliminado uso de localStorage para historico
+- ✅ Fix mensaje boton deposito: ahora muestra "Depositing..." o "Depositing with x402..." segun opcion seleccionada
 
 ---
 
@@ -703,3 +707,6 @@ style={{ color: '#adb5bd' }} // Gris claro sobre fondo oscuro
 - [ ] No hay errores en console del navegador
 - [ ] Performance: First Contentful Paint < 2s
 - [ ] Accesibilidad: Score > 80 en Lighthouse
+- [x] Charts.js usa Redux para estado (no localStorage)
+- [x] Calculo de valor de shares es correcto
+- [x] Mensaje de boton de deposito es coherente con opcion x402

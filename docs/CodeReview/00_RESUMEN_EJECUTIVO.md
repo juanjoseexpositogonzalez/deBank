@@ -3,7 +3,8 @@
 
 **Fecha de revisión:** Enero 2026
 **Revisor:** Experto DeFi
-**Versión revisada:** Branch `charts-polish`
+**Versión revisada:** Branch `fix/deposit-x402-message`
+**Última actualización:** Enero 2026 (PR #6)
 
 ---
 
@@ -86,6 +87,22 @@ dBank es un vault DeFi basado en el estándar ERC-4626 que permite a los usuario
 4. **Frontend: Estilos inline excesivos**
    - Muchos componentes con `style={{...}}` inline
    - Mejor usar CSS/SCSS o styled-components
+
+### RESUELTO - Cambios recientes (PR #6)
+
+1. ~~**Frontend: Dependencias useEffect incorrectas**~~ ✅
+   - Charts.js ahora usa useCallback correctamente
+
+2. ~~**Frontend: Calculo incorrecto de valor de shares**~~ ✅
+   - Antes mezclaba shares con tokens alocados
+   - Nuevo calculo: `unallocatedValue + allocatedValue (con yield)`
+
+3. ~~**Frontend: Re-renders excesivos en Charts.js**~~ ✅
+   - Refactorizado de ~713 a ~310 lineas
+   - Logica movida a Redux (nuevo reducer `charts.js`)
+
+4. ~~**Frontend: Mensaje incorrecto en boton deposito**~~ ✅
+   - Ahora muestra "Depositing..." o "Depositing with x402..." segun corresponda
 
 ---
 
