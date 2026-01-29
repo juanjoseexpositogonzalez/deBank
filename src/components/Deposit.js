@@ -15,15 +15,16 @@ import { isX402Available } from '../utils/x402Config';
 import { formatWithMaxDecimals, getExplorerUrl } from '../utils/format';
 
 import { useSelector, useDispatch } from 'react-redux';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 
 const Deposit = () => {
     const [usdcAmount, setUsdcAmount] = useState("");
-    const [sharesAmount, setSharesAmount] = useState("");   
+    const [sharesAmount, setSharesAmount] = useState("");
     const [showAlert, setShowAlert] = useState(false);
     const [useX402, setUseX402] = useState(false);
     const [x402Loading, setX402Loading] = useState(false);
+    const [vaultValue, setVaultValue] = useState("0");
     
     // Ref for debouncing conversion calls
     const conversionTimeoutRef = useRef(null);
@@ -45,11 +46,38 @@ const Deposit = () => {
 
     const dispatch = useDispatch();
 
-    // Debug: Log cuando cambian los valores de shares o balances
+    // Refresh balances on mount so the vault position is always current
     useEffect(() => {
-        console.log('Deposit component - shares updated:', shares);
-        console.log('Deposit component - balances updated:', balances);
-    }, [shares, balances]);
+        const refreshBalances = async () => {
+            if (dBank && tokens && tokens.length > 0 && account) {
+                try {
+                    await loadBalances(dBank, tokens, account, dispatch);
+                } catch (error) {
+                    console.error("Error refreshing balances in Deposit:", error);
+                }
+            }
+        };
+        refreshBalances();
+    }, [account, dBank, tokens, dispatch]);
+
+    // Compute the user's vault value in USDC from their shares
+    useEffect(() => {
+        const computeVaultValue = async () => {
+            if (!dBank || !shares || parseFloat(shares) <= 0) {
+                setVaultValue("0");
+                return;
+            }
+            try {
+                const sharesBN = ethers.utils.parseUnits(shares.toString(), 18);
+                const assetsBN = await dBank.convertToAssets(sharesBN);
+                setVaultValue(ethers.utils.formatUnits(assetsBN, 18));
+            } catch (error) {
+                // Fallback: in the 1:1 model shares ≈ USDC
+                setVaultValue(shares.toString());
+            }
+        };
+        computeVaultValue();
+    }, [dBank, shares]);
 
     // Refrescar balances cuando hay un depósito exitoso (especialmente para x402)
     useEffect(() => {
@@ -270,9 +298,18 @@ const Deposit = () => {
             <Card style={{ maxWidth: '450px'}} className='mx-auto px-4'>
             {account ? (
                 <Form onSubmit={depositHandler} style={{ maxWidht: '450px', margin: '50px auto'}}>
+                    {/* Vault position indicator */}
+                    {parseFloat(vaultValue) > 0 && (
+                        <Row>
+                            <Form.Text className='text-center my-2' style={{ color: '#20c997', fontSize: '0.95rem', fontWeight: '500' }}>
+                                In Vault: {formatWithMaxDecimals(vaultValue)} {symbols && symbols[0]}
+                                {' '}({formatWithMaxDecimals(shares)} {dBankSymbol})
+                            </Form.Text>
+                        </Row>
+                    )}
                     <Row>
                         <Form.Text className='text-end my-2' style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
-                            Balance: {formatWithMaxDecimals(balances && balances[0] ? balances[0] : "0")}
+                            Wallet: {formatWithMaxDecimals(balances && balances[0] ? balances[0] : "0")}
                             {balances && balances[0] && parseFloat(balances[0]) > 0 && (
                                 <span
                                     onClick={maxHandlerBalance}

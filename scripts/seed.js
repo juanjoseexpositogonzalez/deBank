@@ -159,6 +159,7 @@ async function main() {
 
     // Amounts to fund test accounts (reduced on Sepolia)
     const USER_BALANCE = tokens(isSepolia ? 500 : 100000);
+    const DEPOSIT_AMOUNT_DEPLOYER = tokens(isSepolia ? 200 : 20000);
     const DEPOSIT_AMOUNT_USER1 = tokens(isSepolia ? 100 : 10000);
     const DEPOSIT_AMOUNT_USER2 = tokens(isSepolia ? 50 : 5000);
     const DEPOSIT_AMOUNT_USER3 = tokens(isSepolia ? 30 : 3000);
@@ -248,7 +249,7 @@ async function main() {
         const currentMaxSlippageBps = await configManager.maxSlippageBps();
         if (currentMaxSlippageBps.toString() !== CONFIG_MAX_SLIPPAGE_BPS.toString()) {
             console.log(`  Configuring maxSlippageBps to ${CONFIG_MAX_SLIPPAGE_BPS} (${CONFIG_MAX_SLIPPAGE_BPS / 10}%)...`);
-            const tx = await configManager.setMaxSlippageBps(CONFIG_MAX_SLIPPAGE_BPS, getTxOptions());
+            const tx = await configManager.setMaxSlippageBps(CONFIG_MAX_SLIPPAGE_BPS, await getTxOptions());
             await tx.wait();
             console.log(`  ✓ maxSlippageBps configured\n`);
         } else {
@@ -314,7 +315,7 @@ async function main() {
         const currentStrategyCapS1 = await configManager.strategyCapS1();
         if (!currentStrategyCapS1.eq(CONFIG_STRATEGY_CAP_S1)) {
             console.log(`  Configuring strategyCapS1 to ${ethers.utils.formatUnits(CONFIG_STRATEGY_CAP_S1, 6)} tokens...`);
-            const tx = await configManager.setStrategyCapS1(CONFIG_STRATEGY_CAP_S1, getTxOptions());
+            const tx = await configManager.setStrategyCapS1(CONFIG_STRATEGY_CAP_S1, await getTxOptions());
             await tx.wait();
             console.log(`  ✓ strategyCapS1 configured\n`);
         } else {
@@ -380,7 +381,7 @@ async function main() {
         const currentHarvester = await configManager.harvester();
         if (currentHarvester === ethers.constants.AddressZero || currentHarvester.toLowerCase() !== deployer.address.toLowerCase()) {
             console.log(`  Configuring harvester to ${deployer.address}...`);
-            const tx = await configManager.setHarvester(deployer.address, getTxOptions());
+            const tx = await configManager.setHarvester(deployer.address, await getTxOptions());
             await tx.wait();
             console.log(`  ✓ harvester configured\n`);
         } else {
@@ -572,6 +573,45 @@ async function main() {
     console.log("==========================================");
     console.log("STEP 4: Initial Deposits");
     console.log("==========================================\n");
+
+    // --- Deployer deposit (so the MetaMask default account has a vault position) ---
+    {
+        const deployerBal = await token.balanceOf(deployer.address);
+        if (deployerBal.gte(DEPOSIT_AMOUNT_DEPLOYER)) {
+            console.log(`  Performing deposit from deployer (${deployer.address})...`);
+            console.log(`    Amount: ${ethers.utils.formatEther(DEPOSIT_AMOUNT_DEPLOYER)} tokens`);
+
+            // Approve dBank to spend deployer tokens
+            const allowance = await token.allowance(deployer.address, DBANK_ADDRESS);
+            if (allowance.lt(DEPOSIT_AMOUNT_DEPLOYER)) {
+                const approveTx = await token.approve(DBANK_ADDRESS, DEPOSIT_AMOUNT_DEPLOYER, await getTxOptions());
+                await approveTx.wait();
+                console.log(`    ✓ Allowance approved`);
+            }
+
+            try {
+                const previewShares = await dbank.previewDeposit(DEPOSIT_AMOUNT_DEPLOYER);
+                console.log(`    Expected shares: ${ethers.utils.formatEther(previewShares)}`);
+
+                const tx = await dbank.deposit(DEPOSIT_AMOUNT_DEPLOYER, deployer.address, await getTxOptions());
+                const receipt = await tx.wait();
+
+                const depositEvent = receipt.events.find(e => e.event === 'Deposit');
+                if (depositEvent) {
+                    const { assets, shares } = depositEvent.args;
+                    console.log(`    ✓ Deployer deposit successful:`);
+                    console.log(`      Assets: ${ethers.utils.formatEther(assets)} tokens`);
+                    console.log(`      Shares: ${ethers.utils.formatEther(shares)}\n`);
+                } else {
+                    console.log(`    ✓ Deployer deposit completed\n`);
+                }
+            } catch (error) {
+                console.error(`    ✗ Deployer deposit error: ${error.message}\n`);
+            }
+        } else {
+            console.log(`  ⚠ Deployer does not have sufficient funds to deposit ${ethers.utils.formatEther(DEPOSIT_AMOUNT_DEPLOYER)} tokens\n`);
+        }
+    }
 
     // Perform deposits from test accounts
     const depositAmounts = [DEPOSIT_AMOUNT_USER1, DEPOSIT_AMOUNT_USER2, DEPOSIT_AMOUNT_USER3];
