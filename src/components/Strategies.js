@@ -51,7 +51,7 @@ const Strategies = () => {
   const userShares = useSelector(state => state.dBank.shares) || "0";
   const [userSharesOnChain, setUserSharesOnChain] = useState(null);
   const [allocationSharesByStrategy, setAllocationSharesByStrategy] = useState([]);
-  const [, setPricePerShare] = useState("0"); // Used internally for calculations
+  const [vaultPricePerShare, setVaultPricePerShare] = useState("1"); // PPS del vault para mostrar cuando user no tiene shares
   const userSharesStr = useMemo(() => {
     if (!userShares) return '0';
     if (Array.isArray(userShares)) return '0';
@@ -122,8 +122,14 @@ const Strategies = () => {
 
   const effectivePps = useMemo(() => {
     const totalShares = parseFloat(displaySharesStr || "0");
-    return totalShares > 0 ? totalValue / totalShares : 1;
-  }, [displaySharesStr, totalValue]);
+    // Si el usuario tiene shares, calcular PPS efectivo basado en su valor total
+    // Si no tiene shares, usar el PPS del vault para mostrar el valor correcto
+    if (totalShares > 0) {
+      return totalValue / totalShares;
+    }
+    // Usar PPS del vault cuando el usuario no tiene shares
+    return parseFloat(vaultPricePerShare) || 1;
+  }, [displaySharesStr, totalValue, vaultPricePerShare]);
 
   const maxAlloc = useMemo(() => {
     // For allocate: min(unallocated principal, remaining cap)
@@ -159,7 +165,7 @@ const Strategies = () => {
         if (!cancelled) {
           setUserSharesOnChain(null);
           setAllocationSharesByStrategy([]);
-          setPricePerShare("0");
+          setVaultPricePerShare("1");
         }
         return;
       }
@@ -171,7 +177,7 @@ const Strategies = () => {
         const totalSupply = parseFloat(ethers.utils.formatUnits(totalSupplyBN, 18));
         const pps = totalSupply > 0 ? totalAssets / totalSupply : 1;
         if (!cancelled) {
-          setPricePerShare(pps.toString());
+          setVaultPricePerShare(pps.toString());
         }
 
         const currentSharesBN = await dBank.balanceOf(account);
@@ -484,10 +490,16 @@ const Strategies = () => {
           <Table bordered size="sm" responsive style={{ backgroundColor: 'transparent', color: '#f8f9fa' }}>
             <thead style={{ backgroundColor: 'transparent' }}>
               <tr style={{ backgroundColor: 'transparent' }}>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', width: '30%' }}>Strategy</th>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>Allocated (principal)</th>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{symbols && symbols[0] ? symbols[0] : 'USDC'} (value)</th>
-                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '30%' }}>% of your total value</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent' }}>Strategy</th>
+                <th className="d-none d-md-table-cell" style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center' }}>Principal</th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center' }}>
+                  <span className="d-none d-md-inline">{symbols && symbols[0] ? symbols[0] : 'USDC'} (value)</span>
+                  <span className="d-md-none">Value</span>
+                </th>
+                <th style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center' }}>
+                  <span className="d-none d-md-inline">% of total</span>
+                  <span className="d-md-none">%</span>
+                </th>
               </tr>
             </thead>
             <tbody style={{ backgroundColor: 'transparent' }}>
@@ -507,10 +519,13 @@ const Strategies = () => {
                 const pctStr = formatWithMaxDecimals(pctClamped.toString(), 2);
                 return (
                   <tr key={s.id || idx} style={{ backgroundColor: 'transparent' }}>
-                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', width: '30%' }}>{`Strategy ${s.id}`}</td>
-                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{allocPrincipalFormatted}</td>
-                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center', width: '20%' }}>{allocUsd}</td>
-                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'right', width: '30%' }}>{pctStr}%</td>
+                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent' }}>
+                      <span className="d-none d-md-inline">{`Strategy ${s.id}`}</span>
+                      <span className="d-md-none">{`S${s.id}`}</span>
+                    </td>
+                    <td className="d-none d-md-table-cell" style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center' }}>{allocPrincipalFormatted}</td>
+                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'center' }}>{allocUsd}</td>
+                    <td style={{ color: '#f8f9fa', borderColor: 'rgba(255, 255, 255, 0.2)', borderWidth: '3px', backgroundColor: 'transparent', textAlign: 'right' }}>{pctStr}%</td>
                   </tr>
                 );
               })}

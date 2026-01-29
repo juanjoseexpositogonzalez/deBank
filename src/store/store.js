@@ -6,6 +6,7 @@ import dBank from './reducers/dBank';
 import strategyRouter from './reducers/strategyRouter';
 import mockS1 from './reducers/mockS1';
 import configManager from './reducers/configManager';
+import charts from './reducers/charts';
 
 export const store = configureStore({
   reducer: {
@@ -15,6 +16,7 @@ export const store = configureStore({
     strategyRouter,
     mockS1,
     configManager,
+    charts,
   },
   middleware: (getDefaultMiddleware) => 
     getDefaultMiddleware({

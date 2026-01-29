@@ -18,6 +18,7 @@ export const dBank = createSlice({
             isWithdrawing: false,
             isSuccess: false,
             transactionHash: null,
+            errorMessage: null,
         },
     },
     reducers: {
@@ -74,6 +75,7 @@ export const dBank = createSlice({
             state.withdrawing.isWithdrawing = true;
             state.withdrawing.isSuccess = false;
             state.withdrawing.transactionHash = null;
+            state.withdrawing.errorMessage = null;
         },
         withdrawApproveSuccess: (state, action) => {
             state.withdrawing.isWithdrawing = true;
@@ -89,6 +91,7 @@ export const dBank = createSlice({
             state.withdrawing.isWithdrawing = false;
             state.withdrawing.isSuccess = false;
             state.withdrawing.transactionHash = null;
+            state.withdrawing.errorMessage = action.payload || 'Unknown error';
         },
     }
 })

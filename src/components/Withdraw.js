@@ -1,4 +1,4 @@
-import { Card, Button, Spinner } from 'react-bootstrap';
+import { Card, Button, Spinner, Modal } from 'react-bootstrap';
 import Form from 'react-bootstrap/Form';
 import InputGroup from 'react-bootstrap/InputGroup';
 import Row from 'react-bootstrap/Row';
@@ -10,18 +10,24 @@ import {
     withdrawFunds,
     loadBalances,
 } from '../store/interactions';
+import { formatWithMaxDecimals, getExplorerUrl } from '../utils/format';
 
 import { useSelector, useDispatch } from 'react-redux';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const Withdraw = () => {
     const [usdcAmount, setUsdcAmount] = useState("");
     const [sharesAmount, setSharesAmount] = useState("");   
     const [showAlert, setShowAlert] = useState(false);
+    const [showConfirmModal, setShowConfirmModal] = useState(false);
+    
+    // Ref for debouncing conversion calls
+    const conversionTimeoutRef = useRef(null);
 
     const isWithdrawing = useSelector(state => state.dBank.withdrawing.isWithdrawing);
     const isWithdrawSuccess = useSelector(state => state.dBank.withdrawing.isSuccess);
     const transactionHash = useSelector(state => state.dBank.withdrawing.transactionHash);
+    const withdrawErrorMessage = useSelector(state => state.dBank.withdrawing.errorMessage);
     const chainId = useSelector(state => state.provider.chainId);
 
     const provider = useSelector(state => state.provider.connection);
@@ -30,37 +36,14 @@ const Withdraw = () => {
     const symbols = useSelector(state => state.tokens.symbols);
     const dBankSymbol = useSelector(state => state.dBank.symbol);    
     const shares = useSelector(state => state.dBank.shares);
-    const balances = useSelector(state => state.tokens.balances);
     const dBank = useSelector(state => state.dBank.contract);
     const userTotalAllocated = useSelector(state => state.strategyRouter.userTotalAllocated);
+    const userTotalAllocatedValue = useSelector(state => state.strategyRouter.userTotalAllocatedValue || "0");
     const strategyRouter = useSelector(state => state.strategyRouter.contract);
 
     const dispatch = useDispatch();
 
-    const explorerMap = {
-        1: 'https://etherscan.io/tx/',
-        11155111: 'https://sepolia.etherscan.io/tx/',
-        84532: 'https://sepolia.basescan.org/tx/',
-        31337: ''
-    };
-    const explorerBaseUrl = explorerMap[chainId] || '';
-
-    // Helper function to format numbers with max 4 decimals
-    const formatWithMaxDecimals = (value, maxDecimals = 4) => {
-        if (!value || value === "0" || parseFloat(value) === 0) return "0";
-        const num = parseFloat(value);
-        if (isNaN(num)) return "0";
-        
-        // If number has no decimals or very few, show as is
-        const str = num.toString();
-        const [, decimals] = str.split('.');
-        if (!decimals || decimals.length <= maxDecimals) {
-            return num.toString();
-        }
-        
-        // Otherwise, limit to maxDecimals
-        return num.toFixed(maxDecimals).replace(/\.?0+$/, '');
-    };
+    const explorerBaseUrl = getExplorerUrl(chainId);
 
     // Calculate available shares for withdrawal (block if allocated)
     const [availableShares, setAvailableShares] = useState(shares || "0");
@@ -95,24 +78,67 @@ const Withdraw = () => {
         }
     }, [isWithdrawSuccess, dBank, tokens, account, dispatch]);
     
+    // Helper function to calculate unallocated shares for display
+    // Uses simple model: unallocatedShares = totalShares - allocatedPrincipal
+    // This is consistent with Strategies.js display
+    const calculateUnallocatedShares = async (dBank, strategyRouter, account, currentSharesBN) => {
+        try {
+            const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
+            
+            if (userTotalAllocatedBN.eq(0)) {
+                return currentSharesBN;
+            }
+            
+            // Simple model: unallocated = total - allocated principal
+            const unallocatedSharesBN = currentSharesBN.gt(userTotalAllocatedBN)
+                ? currentSharesBN.sub(userTotalAllocatedBN)
+                : ethers.BigNumber.from(0);
+            
+            console.log('calculateUnallocatedShares:', {
+                currentShares: ethers.utils.formatUnits(currentSharesBN, 18),
+                allocatedPrincipal: ethers.utils.formatUnits(userTotalAllocatedBN, 18),
+                unallocatedShares: ethers.utils.formatUnits(unallocatedSharesBN, 18)
+            });
+            
+            return unallocatedSharesBN;
+        } catch (error) {
+            console.error("Error calculating unallocated shares:", error);
+            return currentSharesBN;
+        }
+    };
+
     useEffect(() => {
         const calculateAvailableShares = async () => {
-            if (!shares || !dBank || !strategyRouter || !userTotalAllocated || parseFloat(userTotalAllocated) === 0) {
+            if (!shares || !dBank || !strategyRouter || !account) {
                 setAvailableShares(shares || "0");
                 return;
             }
             try {
-                // If there is any allocation, block withdrawals
-                setAvailableShares("0");
+                // Get current user shares from contract
+                const currentSharesBN = await dBank.balanceOf(account);
+                const currentShares = parseFloat(ethers.utils.formatUnits(currentSharesBN, 18));
+                
+                if (currentShares <= 0) {
+                    setAvailableShares("0");
+                    return;
+                }
+                
+                // Use helper function to calculate unallocated shares
+                // This now uses the simple formula: unallocatedShares = totalShares - allocatedPrincipal
+                const unallocatedSharesBN = await calculateUnallocatedShares(dBank, strategyRouter, account, currentSharesBN);
+                const unallocatedShares = ethers.utils.formatUnits(unallocatedSharesBN, 18);
+                
+                setAvailableShares(unallocatedShares);
             } catch (error) {
                 console.error("Error calculating available shares:", error);
                 setAvailableShares(shares || "0");
             }
         };
         calculateAvailableShares();
-    }, [shares, dBank, strategyRouter, userTotalAllocated]);
+    }, [shares, dBank, strategyRouter, userTotalAllocated, userTotalAllocatedValue, account]);
 
-    const withdrawHandler = async (e) => {
+    // Validate withdrawal before showing confirmation modal
+    const handleWithdrawClick = async (e) => {
         e.preventDefault();
 
         // Validate input
@@ -138,19 +164,11 @@ const Withdraw = () => {
                 return;
             }
 
-            // Get user's total allocated capital from StrategyRouter
-            const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
-            if (userTotalAllocatedBN.gt(0)) {
-                // alert("No puedes retirar mientras tengas shares alocadas. Desaloca primero.");
-                alert("You cannot withdraw while you have shares allocated. Unallocate first.");
-                return;
-            }
-
-            // Calculate shares that will be withdrawn (based on usdcAmount)
+            // Basic validation: don't exceed total balance
+            // The contract will validate allocations - if rejected, we show a friendly error
             const assetsToWithdrawBN = ethers.utils.parseUnits(usdcAmount, 18);
             const sharesToWithdrawBN = await dBank.convertToShares(assetsToWithdrawBN);
 
-            // Verify we're not withdrawing more than total shares
             if (sharesToWithdrawBN.gt(currentSharesBN)) {
                 alert(`Cannot withdraw. You only have ${currentShares.toFixed(4)} shares.`);
                 return;
@@ -158,9 +176,16 @@ const Withdraw = () => {
         } catch (error) {
             console.error("Error validating withdrawal:", error);
             alert(`Error validating withdrawal: ${error.message || 'Unknown error'}. Please try again.`);
-            return; // CRITICAL: Stop execution if validation fails
+            return;
         }
 
+        // Validation passed, show confirmation modal
+        setShowConfirmModal(true);
+    };
+
+    // Execute withdrawal after confirmation
+    const confirmWithdraw = async () => {
+        setShowConfirmModal(false);
         setShowAlert(false);
 
         const result = await withdrawFunds(provider, dBank, tokens, account, usdcAmount, dispatch);
@@ -174,10 +199,11 @@ const Withdraw = () => {
             setUsdcAmount("");
             setSharesAmount("");
         }
-    }
+    };
 
     const amountHandler = async (e) => {
         const value = e.target.value;
+        const inputId = e.target.id;
 
         // Handle empty input
         if (!value || value === "") {
@@ -185,81 +211,91 @@ const Withdraw = () => {
             setSharesAmount("");
             return;
         }
-        try {
-            if (e.target.id === 'usdc') {
-                setUsdcAmount(e.target.value);
 
-                const amountInWei = ethers.utils.parseUnits(e.target.value || "0", 18);
-                const sharesInWei = await dBank.convertToShares(amountInWei);
-                const sharesFormatted = ethers.utils.formatUnits(sharesInWei, 18);
-                setSharesAmount(sharesFormatted);
-            } else {
-                setSharesAmount(e.target.value);
-                
-                const sharesInWei = ethers.utils.parseUnits(e.target.value || "0", 18);
-                const assetsInWei = await dBank.convertToAssets(sharesInWei);
-                const assetsFormatted = ethers.utils.formatUnits(assetsInWei, 18);
-                setUsdcAmount(assetsFormatted);
-            }
-        } catch (error) {
-            console.error("Conversion error:", error);
+        // Set the input value immediately for responsive UI
+        if (inputId === 'usdc') {
+            setUsdcAmount(value);
+        } else {
+            setSharesAmount(value);
         }
+
+        // Clear previous timeout
+        if (conversionTimeoutRef.current) {
+            clearTimeout(conversionTimeoutRef.current);
+        }
+
+        // Debounce the contract call (300ms delay)
+        conversionTimeoutRef.current = setTimeout(async () => {
+            try {
+                if (inputId === 'usdc') {
+                    const amountInWei = ethers.utils.parseUnits(value || "0", 18);
+                    const sharesInWei = await dBank.convertToShares(amountInWei);
+                    const sharesFormatted = ethers.utils.formatUnits(sharesInWei, 18);
+                    setSharesAmount(sharesFormatted);
+                } else {
+                    const sharesInWei = ethers.utils.parseUnits(value || "0", 18);
+                    const assetsInWei = await dBank.convertToAssets(sharesInWei);
+                    const assetsFormatted = ethers.utils.formatUnits(assetsInWei, 18);
+                    setUsdcAmount(assetsFormatted);
+                }
+            } catch (error) {
+                console.error("Conversion error:", error);
+            }
+        }, 300);
     }
 
-    // Max on asset input should withdraw max assets backed by user's available shares
+    // Max on asset input - uses simple 1:1 model consistent with Strategies.js
     const maxHandlerBalance = async () => {
         if (!dBank || !strategyRouter || !account) return;
 
         try {
-            const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
-            if (userTotalAllocatedBN.gt(0)) {
-                alert("You cannot withdraw while you have shares allocated. Unallocate first.");
-                // alert("No puedes retirar mientras tengas shares alocadas. Desaloca primero.");
-                return;
-            }
-
             const currentSharesBN = await dBank.balanceOf(account);
             if (currentSharesBN.lte(0)) {
                 alert("You don't have any shares to withdraw.");
                 return;
             }
 
-            const availableShares = ethers.utils.formatUnits(currentSharesBN, 18);
-            const assetsInWei = await dBank.convertToAssets(currentSharesBN);
-            const assetsFormatted = ethers.utils.formatUnits(assetsInWei, 18);
+            const unallocatedSharesBN = await calculateUnallocatedShares(dBank, strategyRouter, account, currentSharesBN);
 
+            if (unallocatedSharesBN.lte(0)) {
+                alert("You don't have any unallocated shares available to withdraw. Unallocate first.");
+                return;
+            }
+
+            // Simple 1:1 model: shares = USDC value (consistent with Strategies.js)
+            const availableShares = ethers.utils.formatUnits(unallocatedSharesBN, 18);
+            
             setSharesAmount(availableShares);
-            setUsdcAmount(assetsFormatted);
+            setUsdcAmount(availableShares); // 1:1
         } catch (error) {
             console.error("Max conversion error:", error);
             alert(`Error calculating max withdrawal: ${error.message || 'Unknown error'}`);
         }
     }
 
-    // Max on shares input uses available share balance
+    // Max on shares input - uses simple 1:1 model consistent with Strategies.js
     const maxHandlerShares = async () => {
         if (!dBank || !strategyRouter || !account) return;
 
         try {
-            const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
-            if (userTotalAllocatedBN.gt(0)) {
-                alert("You cannot withdraw while you have shares allocated. Unallocate first.");
-                // alert("No puedes retirar mientras tengas shares alocadas. Desaloca primero.");
-                return;
-            }
-
             const currentSharesBN = await dBank.balanceOf(account);
             if (currentSharesBN.lte(0)) {
                 alert("You don't have any shares to withdraw.");
                 return;
             }
 
-            const availableShares = ethers.utils.formatUnits(currentSharesBN, 18);
-            const assetsInWei = await dBank.convertToAssets(currentSharesBN);
-            const assetsFormatted = ethers.utils.formatUnits(assetsInWei, 18);
+            const unallocatedSharesBN = await calculateUnallocatedShares(dBank, strategyRouter, account, currentSharesBN);
 
+            if (unallocatedSharesBN.lte(0)) {
+                alert("You don't have any unallocated shares available to withdraw. Unallocate first.");
+                return;
+            }
+
+            // Simple 1:1 model: shares = USDC value (consistent with Strategies.js)
+            const availableShares = ethers.utils.formatUnits(unallocatedSharesBN, 18);
+            
             setSharesAmount(availableShares);
-            setUsdcAmount(assetsFormatted);
+            setUsdcAmount(availableShares); // 1:1
         } catch (error) {
             console.error("Max shares conversion error:", error);
             alert(`Error calculating max withdrawal: ${error.message || 'Unknown error'}`);
@@ -270,11 +306,11 @@ const Withdraw = () => {
         <div>
             <Card style={{ maxWidth: '450px'}} className='mx-auto px-4'>
             {account ? (
-                <Form onSubmit={withdrawHandler} style={{ maxWidht: '450px', margin: '50px auto'}}>
+                <Form onSubmit={handleWithdrawClick} style={{ maxWidht: '450px', margin: '50px auto'}}>
                     <Row>
                         <Form.Text className='text-end my-2' style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
-                            Balance: {formatWithMaxDecimals(balances[0])}
-                            {balances && balances[0] && parseFloat(balances[0]) > 0 && (
+                            Vault Balance: {formatWithMaxDecimals(availableShares || "0")}
+                            {availableShares && parseFloat(availableShares) > 0 && (
                                 <span
                                     onClick={maxHandlerBalance}
                                     style={{
@@ -289,7 +325,7 @@ const Withdraw = () => {
                                 </span>
                             )}
                         </Form.Text>
-                        <InputGroup>
+                        <InputGroup hasValidation>
                             <Form.Control 
                               type='number' 
                               placeholder='0.0' 
@@ -298,11 +334,14 @@ const Withdraw = () => {
                               id="usdc"
                               onChange={(e) => amountHandler(e)}
                               value={usdcAmount === 0 ? "" : usdcAmount}
+                              isInvalid={sharesAmount && availableShares && parseFloat(sharesAmount) > parseFloat(availableShares)}
                             />
                           <InputGroup.Text style={{ width: "100px" }} className="justify-content-center">
                              {symbols && symbols[0]}
                           </InputGroup.Text>
-
+                          <Form.Control.Feedback type="invalid">
+                            Amount exceeds available shares
+                          </Form.Control.Feedback>
                         </InputGroup>
                     </Row>
 
@@ -400,10 +439,35 @@ const Withdraw = () => {
                     variant={'danger'}
                     setShowAlert={setShowAlert}
                     explorerBaseUrl={explorerBaseUrl}
+                    errorDetails={withdrawErrorMessage}
                 />
             ) : (
                 <></>
             )}
+
+            {/* Confirmation Modal */}
+            <Modal show={showConfirmModal} onHide={() => setShowConfirmModal(false)} centered>
+                <Modal.Header closeButton style={{ backgroundColor: '#1a1d29', borderColor: 'rgba(255, 255, 255, 0.2)' }}>
+                    <Modal.Title style={{ color: '#f8f9fa' }}>Confirm Withdrawal</Modal.Title>
+                </Modal.Header>
+                <Modal.Body style={{ backgroundColor: '#1a1d29', color: '#adb5bd' }}>
+                    <p>Are you sure you want to withdraw?</p>
+                    <p className="mb-0">
+                        <strong style={{ color: '#f8f9fa' }}>{formatWithMaxDecimals(usdcAmount, 4)} {symbols && symbols[0]}</strong>
+                        <br />
+                        <small>({formatWithMaxDecimals(sharesAmount, 4)} shares)</small>
+                    </p>
+                </Modal.Body>
+                <Modal.Footer style={{ backgroundColor: '#1a1d29', borderColor: 'rgba(255, 255, 255, 0.2)' }}>
+                    <Button variant="secondary" onClick={() => setShowConfirmModal(false)}>
+                        Cancel
+                    </Button>
+                    <Button variant="primary" onClick={confirmWithdraw}>
+                        Confirm Withdrawal
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+
         </div>
     );
 };

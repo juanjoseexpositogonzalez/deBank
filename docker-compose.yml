@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  facilitator:
+    build:
+      context: ./facilitator
+      dockerfile: Dockerfile
+    container_name: dbank-facilitator
+    ports:
+   - "4022:4022"
+    environment:
+   - FACILITATOR_PORT=4022
+   - NETWORK=eip155:84532
+   - BASE_SEPOLIA_RPC_URL=${BASE_SEPOLIA_RPC_URL:-https://sepolia.base.org}
+   - USDC_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7e
+   - DATABASE_PATH=/app/data/facilitator.db
+   - MAX_PAYMENT_AGE_SECONDS=300
+    volumes:
+   - facilitator-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4022/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dbank-backend
+    ports:
+   - "4021:4021"
+    environment:
+   - PORT=4021
+   - FACILITATOR_URL=http://facilitator:4022
+   - NETWORK=eip155:84532
+   - TREASURY_WALLET=${TREASURY_WALLET}
+   - TREASURY_PRIVATE_KEY=${TREASURY_PRIVATE_KEY}
+   - DBANK_ADDRESS=${DBANK_ADDRESS}
+   - BASE_SEPOLIA_RPC_URL=${BASE_SEPOLIA_RPC_URL:-https://sepolia.base.org}
+   - MIN_DEPOSIT_USD=1.00
+   - MAX_DEPOSIT_USD=10000.00
+    depends_on:
+      facilitator:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4021/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  facilitator-data:

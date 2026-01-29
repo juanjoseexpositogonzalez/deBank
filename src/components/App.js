@@ -1,11 +1,12 @@
 import { useEffect } from 'react'
 import { HashRouter, Routes, Route } from 'react-router-dom'
-import { useDispatch } from 'react-redux'
-import { Container } from 'react-bootstrap'
+import { useDispatch, useSelector } from 'react-redux'
+import { Container, Alert } from 'react-bootstrap'
 import { ethers } from 'ethers'
 
 // Components
 import Navigation from './Navigation';
+import { isSupportedChain, getNetworkName } from '../utils/format';
 import Tabs from './Tabs';
 import Deposit from './Deposit';
 import Withdraw from './Withdraw';
@@ -22,6 +23,7 @@ import {
   loadConfigManager,
   loadBalances,
   loadUserStrategyAllocations,
+  loadChartData,
 } from '../store/interactions'
 import { setAccount } from '../store/reducers/provider'
 
@@ -35,6 +37,8 @@ import { setAccount } from '../store/reducers/provider'
 function App() {
 
   const dispatch = useDispatch()
+  const chainId = useSelector(state => state.provider.chainId)
+  const isWrongNetwork = chainId && !isSupportedChain(chainId)
 
   useEffect(() => {
     // Named handlers for proper cleanup
@@ -69,6 +73,8 @@ function App() {
           if (strategyRouterContract) {
             await loadUserStrategyAllocations(strategyRouterContract, currentAccount, dispatch);
           }
+          // Load chart data
+          await loadChartData(nextProvider, nextDBank, strategyRouterContract, currentAccount, dispatch);
         }
       } catch (error) {
         console.error('Error handling chain change:', error);
@@ -100,6 +106,8 @@ function App() {
             if (strategyRouterContract) {
               await loadUserStrategyAllocations(strategyRouterContract, newAccount, dispatch);
             }
+            // Load chart data
+            await loadChartData(freshProvider, freshDBank, strategyRouterContract, newAccount, dispatch);
           }
         } catch (error) {
           console.error('Error loading balances after account change:', error);
@@ -142,6 +150,8 @@ function App() {
           if (strategyRouterContract) {
             await loadUserStrategyAllocations(strategyRouterContract, currentAccount, dispatch);
           }
+          // Load chart data
+          await loadChartData(provider, dBankContract, strategyRouterContract, currentAccount, dispatch);
         }
       } catch (error) {
         console.error('Error loading blockchain data:', error);
@@ -166,6 +176,17 @@ function App() {
     <Container>
       <HashRouter>
         <Navigation />
+        
+        {isWrongNetwork && (
+          <Alert variant="warning" className="text-center my-3">
+            <strong>Unsupported Network</strong>
+            <br />
+            You are connected to {getNetworkName(chainId)}.
+            <br />
+            Please switch to Hardhat Local, Sepolia, or Base Sepolia.
+          </Alert>
+        )}
+        
         <hr />
         <Tabs />        
         <Routes>

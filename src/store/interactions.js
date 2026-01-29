@@ -76,6 +76,16 @@ import {
     setConfigManagerAllowedVenues,
 } from './reducers/configManager';
 
+import {
+    setChartsLoading,
+    addPricePerSharePoint,
+    addUserSharesValuePoint,
+    setCurrentPricePerShare,
+    setCurrentUserSharesValue,
+    setLastBlockTimestamp,
+    clearUserChartData,
+} from './reducers/charts';
+
 import TOKEN_ABI_RAW from '../abis/Token.json'
 import DBANK_ABI_RAW from '../abis/dBank.json'
 import STRATEGY_ROUTER_ABI_RAW from '../abis/StrategyRouter.json'
@@ -342,6 +352,8 @@ export const loadStrategyRouter = async (provider, chainId, dispatch) => {
     dispatch(setStrategyPaused(strategyPaused));
     dispatch(setStrategyCap(strategyCap));
     dispatch(setStrategyAllocated(strategyAllocated));
+
+    return strategyRouter;
 }
 
 // ----------------------------------------------------------
@@ -362,14 +374,20 @@ export const loadUserStrategyAllocations = async (strategyRouter, account, dispa
         dispatch(setUserTotalAllocated(userTotalAllocated));
 
         // Get allocations per strategy
+        // Iterate 1..MAX_STRATEGIES (matching Solidity contract logic), only push
+        // entries for registered strategies so the arrays stay aligned with
+        // loadStrategyRouter's strategies[] order.
         const userAllocations = [];
         const userAllocationsValue = [];
         let userTotalAllocatedValueBN = ethers.BigNumber.from(0);
-        const totalStrategiesBN = await strategyRouter.totalStrategies();
-        const totalStrategies = totalStrategiesBN.toNumber();
-        
-        for (let i = 1; i <= totalStrategies; i++) {
+        const MAX_STRATEGIES = 10;
+
+        for (let i = 1; i <= MAX_STRATEGIES; i++) {
             try {
+                // Skip unregistered strategy slots (same as Solidity contract)
+                const strategyAddress = await strategyRouter.strategies(i);
+                if (strategyAddress === ethers.constants.AddressZero) continue;
+
                 const allocationBN = await strategyRouter.getUserStrategyAllocation(account, i);
                 const allocation = ethers.utils.formatUnits(allocationBN, 18);
                 userAllocations.push(allocation);
@@ -377,8 +395,8 @@ export const loadUserStrategyAllocations = async (strategyRouter, account, dispa
                 // Compute current value of allocation based on strategy totalAssets
                 let allocationValueBN = ethers.BigNumber.from(0);
                 if (allocationBN.gt(0)) {
-                    const [strategyAddress, , , strategyAllocatedBN] = await strategyRouter.getStrategy(i);
-                    if (strategyAddress && strategyAddress !== ethers.constants.AddressZero && strategyAllocatedBN.gt(0)) {
+                    const [, , , strategyAllocatedBN] = await strategyRouter.getStrategy(i);
+                    if (strategyAllocatedBN.gt(0)) {
                         try {
                             const strategy = new ethers.Contract(
                                 strategyAddress,
@@ -386,17 +404,6 @@ export const loadUserStrategyAllocations = async (strategyRouter, account, dispa
                                 strategyRouter.provider
                             );
                             const strategyTotalAssetsBN = await strategy.totalAssets();
-                            
-                            // Log for debugging yield calculation
-                            if (i === 1) { // Only log for strategy 1 to avoid spam
-                                console.log('loadUserStrategyAllocations - Strategy 1:', {
-                                    allocation: ethers.utils.formatUnits(allocationBN, 18),
-                                    strategyTotalAssets: ethers.utils.formatUnits(strategyTotalAssetsBN, 18),
-                                    strategyAllocated: ethers.utils.formatUnits(strategyAllocatedBN, 18),
-                                    calculatedValue: ethers.utils.formatUnits(allocationBN.mul(strategyTotalAssetsBN).div(strategyAllocatedBN), 18)
-                                });
-                            }
-                            
                             allocationValueBN = allocationBN.mul(strategyTotalAssetsBN).div(strategyAllocatedBN);
                         } catch (error) {
                             console.error(`Error getting totalAssets for strategy ${i}:`, error);
@@ -410,8 +417,8 @@ export const loadUserStrategyAllocations = async (strategyRouter, account, dispa
                 userAllocationsValue.push(ethers.utils.formatUnits(allocationValueBN, 18));
                 userTotalAllocatedValueBN = userTotalAllocatedValueBN.add(allocationValueBN);
             } catch (error) {
-                userAllocations.push("0");
-                userAllocationsValue.push("0");
+                // If we can't read this slot, skip it (don't push placeholder)
+                console.warn(`Error reading strategy ${i} allocation:`, error.message);
             }
         }
         
@@ -855,9 +862,78 @@ export const withdrawFunds = async (provider, dBank, tokens, account, usdcAmount
 
         return true;
     } catch (error) {
-        dispatch(withdrawFail(error.message));
+        // Parse custom errors from dBank contract for user-friendly messages
+        let errorMessage = parseWithdrawError(error);
+        console.error('Withdraw error:', error);
+        dispatch(withdrawFail(errorMessage));
         return false;
     }
+}
+
+// Helper function to parse withdraw errors into user-friendly messages
+const parseWithdrawError = (error) => {
+    const errorString = error.message || error.toString();
+    
+    // Check for dBank custom errors
+    if (errorString.includes('dBank__SharesAllocated')) {
+        // Extract the allocated shares amount from the error
+        const match = errorString.match(/dBank__SharesAllocated\((\d+)\)/);
+        if (match) {
+            const allocatedWei = match[1];
+            try {
+                const allocatedShares = ethers.utils.formatUnits(allocatedWei, 18);
+                return `Cannot withdraw: You have ${parseFloat(allocatedShares).toFixed(4)} shares allocated to strategies. Please unallocate first before withdrawing.`;
+            } catch {
+                return 'Cannot withdraw: You have shares allocated to strategies. Please unallocate first before withdrawing.';
+            }
+        }
+        return 'Cannot withdraw: You have shares allocated to strategies. Please unallocate first before withdrawing.';
+    }
+    
+    if (errorString.includes('dBank__InsufficientShares')) {
+        return 'Cannot withdraw: Insufficient shares balance.';
+    }
+    
+    if (errorString.includes('dBank__InsufficientLiquidity')) {
+        return 'Cannot withdraw: Insufficient liquidity in the vault. Please try a smaller amount or wait for more liquidity.';
+    }
+    
+    if (errorString.includes('dBank__CapExceeded')) {
+        return 'Cannot withdraw: Amount exceeds the withdrawal cap.';
+    }
+    
+    if (errorString.includes('dBank__InvalidAmount')) {
+        return 'Cannot withdraw: Invalid amount specified.';
+    }
+    
+    if (errorString.includes('dBank__Paused')) {
+        return 'Cannot withdraw: The vault is currently paused.';
+    }
+    
+    if (errorString.includes('user rejected') || errorString.includes('User denied')) {
+        return 'Transaction was rejected by the user.';
+    }
+    
+    if (errorString.includes('insufficient funds')) {
+        return 'Insufficient funds for gas fees.';
+    }
+    
+    // For other errors, try to extract a cleaner message
+    if (error.reason) {
+        return error.reason;
+    }
+    
+    // If the error message is too long, truncate it
+    if (errorString.length > 200) {
+        // Try to find a meaningful part of the error
+        const revertMatch = errorString.match(/reverted with[^']*'([^']+)'/);
+        if (revertMatch) {
+            return `Transaction reverted: ${revertMatch[1]}`;
+        }
+        return errorString.substring(0, 200) + '...';
+    }
+    
+    return errorString;
 }
 
 // ----------------------------------------------------------
@@ -1076,5 +1152,144 @@ export const loadStrategyReturns = async (provider, strategyRouter, dispatch) =>
         // dispatch(setStrategyReturns(returns));
     } catch (error) {
         console.error("loadStrategyReturns error:", error);
+    }
+}
+
+// ----------------------------------------------------------
+// LOAD CHART DATA
+// Calculates current values and adds points to chart history
+export const loadChartData = async (provider, dBank, strategyRouter, account, dispatch) => {
+    if (!provider || !dBank) {
+        return;
+    }
+
+    try {
+        dispatch(setChartsLoading(true));
+
+        // Get current block timestamp
+        const currentBlock = await provider.getBlock('latest');
+        const currentTimestamp = currentBlock.timestamp * 1000; // Convert to milliseconds
+        dispatch(setLastBlockTimestamp(currentTimestamp));
+
+        // Get vault state
+        const totalAssets = await dBank.totalAssets();
+        const totalSupply = await dBank.totalSupply();
+
+        // Calculate vault price per share
+        let vaultPricePerShare = 1;
+        if (totalSupply.gt(0)) {
+            const totalAssetsNum = parseFloat(ethers.utils.formatUnits(totalAssets, 18));
+            const totalSupplyNum = parseFloat(ethers.utils.formatUnits(totalSupply, 18));
+            vaultPricePerShare = totalAssetsNum / totalSupplyNum;
+        }
+
+        // If no account, only track vault-level price per share
+        if (!account) {
+            dispatch(setCurrentPricePerShare(vaultPricePerShare.toString()));
+            dispatch(addPricePerSharePoint({ x: currentTimestamp, y: vaultPricePerShare }));
+            dispatch(clearUserChartData());
+            dispatch(setChartsLoading(false));
+            return;
+        }
+
+        // Get user shares in vault
+        const userSharesBN = await dBank.balanceOf(account);
+        const userShares = parseFloat(ethers.utils.formatUnits(userSharesBN, 18));
+
+        // Now calculate strategy allocations value
+        let allocatedPrincipal = 0;
+        let allocatedValue = 0;
+
+        if (strategyRouter) {
+            try {
+                // Get total strategies
+                const totalStrategiesBN = await strategyRouter.totalStrategies();
+                const totalStrategies = totalStrategiesBN.toNumber();
+
+                // Iterate through strategies to get user allocations
+                for (let i = 1; i <= totalStrategies; i++) {
+                    try {
+                        const allocationBN = await strategyRouter.getUserStrategyAllocation(account, i);
+                        if (allocationBN.gt(0)) {
+                            const allocation = parseFloat(ethers.utils.formatUnits(allocationBN, 18));
+                            allocatedPrincipal += allocation;
+
+                            // Get current value of this allocation
+                            const [strategyAddr, , , strategyAllocatedBN] = await strategyRouter.getStrategy(i);
+                            
+                            if (strategyAddr && strategyAddr !== ethers.constants.AddressZero && strategyAllocatedBN.gt(0)) {
+                                try {
+                                    const strategy = new ethers.Contract(
+                                        strategyAddr,
+                                        ["function totalAssets() view returns (uint256)"],
+                                        provider
+                                    );
+                                    const strategyTotalAssetsBN = await strategy.totalAssets();
+                                    
+                                    // User's share of strategy = (userAllocation / strategyAllocated) * strategyTotalAssets
+                                    const allocationValueBN = allocationBN.mul(strategyTotalAssetsBN).div(strategyAllocatedBN);
+                                    allocatedValue += parseFloat(ethers.utils.formatUnits(allocationValueBN, 18));
+                                } catch (strategyError) {
+                                    // If can't get strategy value, use principal as fallback
+                                    allocatedValue += allocation;
+                                }
+                            } else {
+                                allocatedValue += allocation;
+                            }
+                        }
+                    } catch (allocError) {
+                        // Strategy might not exist, continue
+                    }
+                }
+            } catch (routerError) {
+                console.warn('Error loading strategy allocations for charts:', routerError.message);
+            }
+        }
+
+        // Calculate total user value
+        // This matches the calculation in Strategies.js:
+        // - unallocatedPrincipal = totalShares - allocatedPrincipal (value is 1:1 with USDC)
+        // - totalValue = allocatedValue (with yield) + unallocatedPrincipal
+        // 
+        // The unallocated shares are NOT multiplied by vaultPricePerShare because:
+        // 1. They haven't generated yield in strategies
+        // 2. The model treats them as having 1:1 value with USDC
+        // 3. This ensures consistency with Strategies.js and Withdraw.js
+        
+        const unallocatedShares = Math.max(userShares - allocatedPrincipal, 0);
+        const unallocatedValue = unallocatedShares; // 1:1 with USDC, not multiplied by PPS
+        const totalUserValue = unallocatedValue + allocatedValue;
+
+        // Calculate effective price per share for this user
+        // This represents what 1 share is "worth" considering their allocation mix
+        const effectivePricePerShare = userShares > 0 
+            ? totalUserValue / userShares 
+            : vaultPricePerShare;
+
+        // Debug logging
+        console.log('loadChartData:', {
+            timestamp: new Date(currentTimestamp).toISOString(),
+            vaultPPS: vaultPricePerShare.toFixed(6),
+            userShares: userShares.toFixed(4),
+            allocatedPrincipal: allocatedPrincipal.toFixed(4),
+            allocatedValue: allocatedValue.toFixed(4),
+            unallocatedShares: unallocatedShares.toFixed(4),
+            unallocatedValue: unallocatedValue.toFixed(4),
+            totalUserValue: totalUserValue.toFixed(4),
+            effectivePPS: effectivePricePerShare.toFixed(6),
+        });
+
+        // Dispatch current values
+        dispatch(setCurrentPricePerShare(effectivePricePerShare.toString()));
+        dispatch(setCurrentUserSharesValue(totalUserValue.toString()));
+
+        // Add points to history
+        dispatch(addPricePerSharePoint({ x: currentTimestamp, y: effectivePricePerShare }));
+        dispatch(addUserSharesValuePoint({ x: currentTimestamp, y: totalUserValue }));
+
+    } catch (error) {
+        console.error('loadChartData error:', error);
+    } finally {
+        dispatch(setChartsLoading(false));
     }
 }

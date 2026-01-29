@@ -32,7 +32,14 @@
 8. Codigo duplicado entre Deposit y Withdraw
 9. Estilos inline excesivos
 10. Tests de integracion insuficientes
-11. Dependencias useEffect incorrectas
+11. ~~Dependencias useEffect incorrectas~~ ✅ RESUELTO (PR #6)
+
+### Resueltos Recientemente (PR #6)
+
+- ✅ Charts.js refactorizado a Redux (~713 -> ~310 lineas)
+- ✅ Calculo correcto del valor de shares
+- ✅ Fix mensaje boton deposito x402
+- ✅ Eliminado localStorage para historico de charts
 
 ---
 
