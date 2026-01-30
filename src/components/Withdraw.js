@@ -51,18 +51,19 @@ const Withdraw = () => {
     // Strategy allocations are independent (tokens go from wallet, not vault)
     const availableShares = shares || "0";
 
-    // Refresh balances when component mounts
+    // Refresh balances and depositors when component mounts
     useEffect(() => {
-        const refreshBalances = async () => {
+        const refreshData = async () => {
             if (dBank && tokens && account) {
                 try {
                     await loadBalances(dBank, tokens, account, dispatch);
+                    await loadDepositors(dBank, dispatch);
                 } catch (error) {
-                    console.error("Error refreshing balances in Withdraw:", error);
+                    console.error("Error refreshing data in Withdraw:", error);
                 }
             }
         };
-        refreshBalances();
+        refreshData();
     }, [account, dBank, tokens, dispatch]);
 
     // Refresh after successful withdraw

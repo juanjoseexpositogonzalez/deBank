@@ -97,6 +97,10 @@ export const dBank = createSlice({
             state.withdrawing.transactionHash = null;
             state.withdrawing.errorMessage = action.payload || 'Unknown error';
         },
+        clearDepositors: (state) => {
+            state.depositors.list = [];
+            state.depositors.isLoading = true;
+        },
         setDepositorsLoading: (state, action) => {
             state.depositors.isLoading = action.payload;
         },
@@ -121,6 +125,7 @@ export const {
     withdrawApproveSuccess,
     withdrawSuccess,
     withdrawFail,
+    clearDepositors,
     setDepositorsLoading,
     setDepositorsList,
 } = dBank.actions;
