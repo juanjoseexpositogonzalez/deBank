@@ -27,6 +27,7 @@ import {
   loadDepositors,
 } from '../store/interactions'
 import { setAccount } from '../store/reducers/provider'
+import { clearDepositors } from '../store/reducers/dBank'
 
 // ABIs: Import your contract ABIs here
 // import TOKEN_ABI from '../abis/Token.json'
@@ -45,6 +46,9 @@ function App() {
     // Named handlers for proper cleanup
     const handleChainChanged = async () => {
       try {
+        // Clear stale depositors immediately so the UI shows a spinner
+        dispatch(clearDepositors());
+
         // Small delay to let MetaMask RPC fully switch
         await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -86,6 +90,9 @@ function App() {
     };
 
     const handleAccountsChanged = async () => {
+      // Clear stale depositors immediately
+      dispatch(clearDepositors());
+
       const accounts = await window.ethereum.request({ method: 'eth_accounts' });
       if (accounts && accounts.length > 0) {
         const newAccount = ethers.utils.getAddress(accounts[0]);

@@ -50,18 +50,19 @@ const Deposit = () => {
 
     const dispatch = useDispatch();
 
-    // Refresh balances on mount so the vault position is always current
+    // Refresh balances and depositors on mount so the vault position is always current
     useEffect(() => {
-        const refreshBalances = async () => {
+        const refreshData = async () => {
             if (dBank && tokens && tokens.length > 0 && account) {
                 try {
                     await loadBalances(dBank, tokens, account, dispatch);
+                    await loadDepositors(dBank, dispatch);
                 } catch (error) {
-                    console.error("Error refreshing balances in Deposit:", error);
+                    console.error("Error refreshing data in Deposit:", error);
                 }
             }
         };
-        refreshBalances();
+        refreshData();
     }, [account, dBank, tokens, dispatch]);
 
     // Compute the user's vault value in USDC from their shares
