@@ -60,7 +60,7 @@ async function main() {
 
     // Correct caps for Base Sepolia (18 decimals)
     const TVL_CAP = ethers.utils.parseUnits("100000", tokenDecimals); // 100,000 tokens
-    const PER_TX_CAP = ethers.utils.parseUnits("5000", tokenDecimals); // 5,000 tokens
+    const PER_TX_CAP = ethers.utils.parseUnits("10000", tokenDecimals); // 10,000 tokens
 
     console.log("Target caps:");
     console.log(`  tvlCap: ${ethers.utils.formatUnits(TVL_CAP, tokenDecimals)} tokens`);

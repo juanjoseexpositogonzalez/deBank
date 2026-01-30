@@ -39,6 +39,7 @@ const Withdraw = () => {
     const shares = useSelector(state => state.dBank.shares);
     const balances = useSelector(state => state.tokens.balances);
     const dBank = useSelector(state => state.dBank.contract);
+    const strategyRouter = useSelector(state => state.strategyRouter.contract);
     const depositorsList = useSelector(state => state.dBank.depositors.list);
     const depositorsLoading = useSelector(state => state.dBank.depositors.isLoading);
 
@@ -193,7 +194,7 @@ const Withdraw = () => {
         }, 300);
     }
 
-    // Max on asset input - sets to full vault balance
+    // Max on asset input - sets to unallocated vault balance (total shares minus strategy allocations)
     const maxHandlerBalance = async () => {
         if (!dBank || !account) return;
 
@@ -204,15 +205,34 @@ const Withdraw = () => {
                 return;
             }
 
-            const assetsBN = await dBank.convertToAssets(currentSharesBN);
+            // Subtract allocated shares
+            let unallocatedSharesBN = currentSharesBN;
+            if (strategyRouter) {
+                try {
+                    const allocatedBN = await strategyRouter.getUserTotalAllocated(account);
+                    const allocatedSharesBN = await dBank.convertToShares(allocatedBN);
+                    unallocatedSharesBN = currentSharesBN.gt(allocatedSharesBN)
+                        ? currentSharesBN.sub(allocatedSharesBN)
+                        : ethers.BigNumber.from(0);
+                } catch (err) {
+                    console.warn("Could not fetch allocated shares:", err.message);
+                }
+            }
+
+            if (unallocatedSharesBN.lte(0)) {
+                alert("All your shares are allocated to strategies. Un-allocate first.");
+                return;
+            }
+
+            const assetsBN = await dBank.convertToAssets(unallocatedSharesBN);
             setUsdcAmount(ethers.utils.formatUnits(assetsBN, 18));
-            setSharesAmount(ethers.utils.formatUnits(currentSharesBN, 18));
+            setSharesAmount(ethers.utils.formatUnits(unallocatedSharesBN, 18));
         } catch (error) {
             console.error("Max conversion error:", error);
         }
     }
 
-    // Max on shares input - sets to full vault balance
+    // Max on shares input - sets to unallocated vault balance
     const maxHandlerShares = async () => {
         if (!dBank || !account) return;
 
@@ -223,9 +243,28 @@ const Withdraw = () => {
                 return;
             }
 
-            const assetsBN = await dBank.convertToAssets(currentSharesBN);
+            // Subtract allocated shares
+            let unallocatedSharesBN = currentSharesBN;
+            if (strategyRouter) {
+                try {
+                    const allocatedBN = await strategyRouter.getUserTotalAllocated(account);
+                    const allocatedSharesBN = await dBank.convertToShares(allocatedBN);
+                    unallocatedSharesBN = currentSharesBN.gt(allocatedSharesBN)
+                        ? currentSharesBN.sub(allocatedSharesBN)
+                        : ethers.BigNumber.from(0);
+                } catch (err) {
+                    console.warn("Could not fetch allocated shares:", err.message);
+                }
+            }
+
+            if (unallocatedSharesBN.lte(0)) {
+                alert("All your shares are allocated to strategies. Un-allocate first.");
+                return;
+            }
+
+            const assetsBN = await dBank.convertToAssets(unallocatedSharesBN);
             setUsdcAmount(ethers.utils.formatUnits(assetsBN, 18));
-            setSharesAmount(ethers.utils.formatUnits(currentSharesBN, 18));
+            setSharesAmount(ethers.utils.formatUnits(unallocatedSharesBN, 18));
         } catch (error) {
             console.error("Max shares conversion error:", error);
         }

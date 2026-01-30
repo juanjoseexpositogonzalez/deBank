@@ -142,20 +142,20 @@ async function main() {
     // ============================================================
     const BUFFER_TARGET_BPS = 1200; // 12%
     const PERFORMANCE_FEE_BPS = 2500; // 25% (2500 bps)
-    const TVL_CAP = tokens(isSepolia ? 1000 : 100000); // smaller on Sepolia
-    const PER_TX_CAP = tokens(isSepolia ? 200 : 5000); // smaller on Sepolia
+    const TVL_CAP = tokens(100000); // 100K tokens (same across all networks)
+    const PER_TX_CAP = tokens(10000); // 10K tokens per tx (same across all networks)
 
     // ConfigManager parameters (uses 6 decimals format: e6)
     const CONFIG_LIQUIDITY_BUFFER_BPS = 1200; // 12%
     const CONFIG_MAX_SLIPPAGE_BPS = 30; // 0.3%
-    const CONFIG_TVL_GLOBAL_CAP = tokens6(isSepolia ? 1000 : 100000);
-    const CONFIG_PER_TX_CAP = tokens6(isSepolia ? 200 : 5000);
+    const CONFIG_TVL_GLOBAL_CAP = tokens6(100000); // 100K tokens
+    const CONFIG_PER_TX_CAP = tokens6(10000); // 10K tokens
     const CONFIG_PERFORMANCE_FEE_BPS = 2500; // 25% (2500 bps)
     const CONFIG_EPOCH_DURATION = 7; // 7 days
     const CONFIG_SETTLEMENT_WINDOW_UTC = 12 * 3600; // 12 hours in seconds
-    const CONFIG_STRATEGY_CAP_S1 = tokens6(isSepolia ? 1000 : 100000);
-    const CONFIG_STRATEGY_CAP_S2 = tokens6(isSepolia ? 500 : 50000);
-    const CONFIG_STRATEGY_CAP_S3 = tokens6(isSepolia ? 250 : 25000);
+    const CONFIG_STRATEGY_CAP_S1 = tokens6(100000); // 100K tokens
+    const CONFIG_STRATEGY_CAP_S2 = tokens6(50000); // 50K tokens
+    const CONFIG_STRATEGY_CAP_S3 = tokens6(25000); // 25K tokens
 
     // Amounts to fund test accounts (reduced on Sepolia)
     const USER_BALANCE = tokens(isSepolia ? 500 : 100000);
