@@ -43,6 +43,7 @@ const Deposit = () => {
     const dBankSymbol = useSelector(state => state.dBank.symbol);
     const shares = useSelector(state => state.dBank.shares);
     const totalAssets = useSelector(state => state.dBank.assets);
+    const totalSupply = useSelector(state => state.dBank.totalSupply);
     const balances = useSelector(state => state.tokens.balances);
     const dBank = useSelector(state => state.dBank.contract);
     const depositorsList = useSelector(state => state.dBank.depositors.list);
@@ -66,23 +67,19 @@ const Deposit = () => {
     }, [account, dBank, tokens, dispatch]);
 
     // Compute the user's vault value in USDC from their shares
+    // Uses Redux state (same snapshot as Total in Vault) to avoid timing discrepancies
     useEffect(() => {
-        const computeVaultValue = async () => {
-            if (!dBank || !shares || parseFloat(shares) <= 0) {
-                setVaultValue("0");
-                return;
-            }
-            try {
-                const sharesBN = ethers.utils.parseUnits(shares.toString(), 18);
-                const assetsBN = await dBank.convertToAssets(sharesBN);
-                setVaultValue(ethers.utils.formatUnits(assetsBN, 18));
-            } catch (error) {
-                // Fallback: in the 1:1 model shares ≈ USDC
-                setVaultValue(shares.toString());
-            }
-        };
-        computeVaultValue();
-    }, [dBank, shares]);
+        const sharesVal = parseFloat(shares);
+        const totalAssetsVal = parseFloat(totalAssets);
+        const totalSupplyVal = parseFloat(totalSupply);
+
+        if (!sharesVal || sharesVal <= 0 || !totalAssetsVal || totalAssetsVal <= 0 || !totalSupplyVal || totalSupplyVal <= 0) {
+            setVaultValue("0");
+            return;
+        }
+
+        setVaultValue((sharesVal * totalAssetsVal / totalSupplyVal).toString());
+    }, [shares, totalAssets, totalSupply]);
 
     // Refrescar balances cuando hay un depósito exitoso (especialmente para x402)
     useEffect(() => {
