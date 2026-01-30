@@ -37,6 +37,7 @@ const Withdraw = () => {
     const symbols = useSelector(state => state.tokens.symbols);
     const dBankSymbol = useSelector(state => state.dBank.symbol);
     const shares = useSelector(state => state.dBank.shares);
+    const balances = useSelector(state => state.tokens.balances);
     const dBank = useSelector(state => state.dBank.contract);
     const depositorsList = useSelector(state => state.dBank.depositors.list);
     const depositorsLoading = useSelector(state => state.dBank.depositors.isLoading);
@@ -237,7 +238,7 @@ const Withdraw = () => {
                 <Form onSubmit={handleWithdrawClick} style={{ maxWidht: '450px', margin: '50px auto'}}>
                     <Row>
                         <Form.Text className='text-end my-2' style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
-                            Vault Balance: {formatWithMaxDecimals(availableShares || "0")}
+                            Wallet Balance: {formatWithMaxDecimals(balances && balances[0] ? balances[0] : "0")} {symbols && symbols[0]}
                             {availableShares && parseFloat(availableShares) > 0 && (
                                 <span
                                     onClick={maxHandlerBalance}
@@ -273,9 +274,9 @@ const Withdraw = () => {
                         </InputGroup>
                     </Row>
 
-                    <Row className='my-3'>                        
+                    <Row className='my-3'>
                         <Form.Text className='text-end my-2' style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
-                            Shares: {formatWithMaxDecimals(shares)}
+                            Wallet Shares: {formatWithMaxDecimals(shares)} {dBankSymbol}
                             {shares && parseFloat(shares) > 0 && (
                                 <span
                                     onClick={maxHandlerShares}
