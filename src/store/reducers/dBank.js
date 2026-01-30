@@ -20,6 +20,10 @@ export const dBank = createSlice({
             transactionHash: null,
             errorMessage: null,
         },
+        depositors: {
+            list: [],
+            isLoading: false,
+        },
     },
     reducers: {
         setContract: (state, action) => {
@@ -93,6 +97,13 @@ export const dBank = createSlice({
             state.withdrawing.transactionHash = null;
             state.withdrawing.errorMessage = action.payload || 'Unknown error';
         },
+        setDepositorsLoading: (state, action) => {
+            state.depositors.isLoading = action.payload;
+        },
+        setDepositorsList: (state, action) => {
+            state.depositors.list = action.payload;
+            state.depositors.isLoading = false;
+        },
     }
 })
 
@@ -110,6 +121,8 @@ export const {
     withdrawApproveSuccess,
     withdrawSuccess,
     withdrawFail,
+    setDepositorsLoading,
+    setDepositorsList,
 } = dBank.actions;
 
 export default dBank.reducer;

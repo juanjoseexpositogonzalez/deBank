@@ -28,6 +28,8 @@ import {
     withdrawApproveSuccess,
     withdrawSuccess,
     withdrawFail,
+    setDepositorsLoading,
+    setDepositorsList,
 } from './reducers/dBank';
 
 import {
@@ -552,6 +554,53 @@ export const loadBalances = async(dBank, tokens, account, dispatch) => {
         throw error;
     }
 }
+
+// ----------------------------------------------------------
+// LOAD DEPOSITORS (from Deposit events)
+export const loadDepositors = async (dBank, dispatch) => {
+    try {
+        dispatch(setDepositorsLoading(true));
+
+        // Query all Deposit events to find unique depositor addresses
+        const depositFilter = dBank.filters.Deposit();
+        const depositEvents = await dBank.queryFilter(depositFilter);
+
+        // Collect unique depositor addresses from the 'owner' field
+        const uniqueAddresses = new Set();
+        for (const event of depositEvents) {
+            uniqueAddresses.add(event.args.owner);
+        }
+
+        // For each unique depositor, get current balance and convert to assets
+        const depositorsList = [];
+        for (const addr of uniqueAddresses) {
+            const sharesBN = await dBank.balanceOf(addr);
+            if (sharesBN.lte(0)) continue;
+
+            let usdcValueBN;
+            try {
+                usdcValueBN = await dBank.convertToAssets(sharesBN);
+            } catch {
+                usdcValueBN = sharesBN;
+            }
+
+            depositorsList.push({
+                address: addr,
+                shares: ethers.utils.formatUnits(sharesBN, 18),
+                usdcValue: ethers.utils.formatUnits(usdcValueBN, 18),
+            });
+        }
+
+        // Sort by USDC value descending
+        depositorsList.sort((a, b) => parseFloat(b.usdcValue) - parseFloat(a.usdcValue));
+
+        dispatch(setDepositorsList(depositorsList));
+    } catch (error) {
+        console.error('Error loading depositors:', error);
+        dispatch(setDepositorsLoading(false));
+    }
+}
+
 // ----------------------------------------------------------
 // DEPOSIT FUNDS
 export const depositFunds = async (provider, dBank, tokens, account, usdcAmount, dispatch) => {
@@ -854,10 +903,7 @@ export const withdrawFunds = async (provider, dBank, tokens, account, usdcAmount
 
         dispatch(withdrawSuccess(withdrawTx.hash));
 
-        // Esperar un poco para asegurar que la transacción esté confirmada
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // Recargar balances después del withdraw
+        // Reload balances after withdraw (tx already confirmed via .wait())
         await loadBalances(dBank, tokens, account, dispatch);
 
         return true;

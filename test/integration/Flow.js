@@ -81,17 +81,17 @@ describe('Integration Flow', () => {
         ).to.not.be.reverted;
     });
 
-    it('fail path: withdraw blocked while user has allocations', async () => {
+    it('withdraw succeeds even when user has allocations (allocations are separate)', async () => {
         // 1. User deposits 5000
         await dbank.connect(user).deposit(tokens(5000), user.address);
 
         // 2. User allocates 3500 to strategy
         await strategyRouter.connect(user).depositToStrategy(1, tokens(3500));
 
-        // 3. User tries to withdraw more than unallocated shares
+        // 3. User can withdraw because strategy allocations don't block vault withdrawals
         await expect(
             dbank.connect(user).withdraw(tokens(2000), user.address, user.address)
-        ).to.be.revertedWithCustomError(dbank, 'dBank__SharesAllocated');
+        ).to.not.be.reverted;
     });
 
     it('un-allocate then withdraw shares after yield accrual', async () => {

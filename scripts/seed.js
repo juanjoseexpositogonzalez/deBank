@@ -159,10 +159,10 @@ async function main() {
 
     // Amounts to fund test accounts (reduced on Sepolia)
     const USER_BALANCE = tokens(isSepolia ? 500 : 100000);
-    const DEPOSIT_AMOUNT_DEPLOYER = tokens(isSepolia ? 200 : 20000);
-    const DEPOSIT_AMOUNT_USER1 = tokens(isSepolia ? 100 : 10000);
-    const DEPOSIT_AMOUNT_USER2 = tokens(isSepolia ? 50 : 5000);
-    const DEPOSIT_AMOUNT_USER3 = tokens(isSepolia ? 30 : 3000);
+    const DEPOSIT_AMOUNT_DEPLOYER = tokens(isSepolia ? 200 : 5000);
+    const DEPOSIT_AMOUNT_USER1 = tokens(isSepolia ? 100 : 5000);
+    const DEPOSIT_AMOUNT_USER2 = tokens(isSepolia ? 50 : 3000);
+    const DEPOSIT_AMOUNT_USER3 = tokens(isSepolia ? 30 : 2000);
 
     // Number of test users to create (maximum 3)
     const NUM_SEED_USERS = Math.min(3, users.length);

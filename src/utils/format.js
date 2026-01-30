@@ -63,6 +63,16 @@ export const isSupportedChain = (chainId) => {
  * @param {number|string} chainId - The chain ID
  * @returns {string} The network name
  */
+/**
+ * Truncate an Ethereum address for display
+ * @param {string} address - Full Ethereum address
+ * @returns {string} Truncated address (e.g. "0x1234...abcd")
+ */
+export const truncateAddress = (address) => {
+    if (!address) return '';
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+};
+
 export const getNetworkName = (chainId) => {
     const names = {
         1: 'Ethereum Mainnet',

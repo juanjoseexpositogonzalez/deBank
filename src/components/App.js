@@ -24,6 +24,7 @@ import {
   loadBalances,
   loadUserStrategyAllocations,
   loadChartData,
+  loadDepositors,
 } from '../store/interactions'
 import { setAccount } from '../store/reducers/provider'
 
@@ -69,6 +70,7 @@ function App() {
         if (accounts && accounts.length > 0 && nextDBank && nextTokens && nextTokens.length > 0) {
           const currentAccount = ethers.utils.getAddress(accounts[0]);
           await loadBalances(nextDBank, nextTokens, currentAccount, dispatch);
+          await loadDepositors(nextDBank, dispatch);
           // Load user allocations
           if (strategyRouterContract) {
             await loadUserStrategyAllocations(strategyRouterContract, currentAccount, dispatch);
@@ -102,6 +104,7 @@ function App() {
           // Now load balances with fresh contracts
           if (freshDBank && freshTokens && freshTokens.length > 0) {
             await loadBalances(freshDBank, freshTokens, newAccount, dispatch);
+            await loadDepositors(freshDBank, dispatch);
             // Load user allocations
             if (strategyRouterContract) {
               await loadUserStrategyAllocations(strategyRouterContract, newAccount, dispatch);
@@ -146,6 +149,7 @@ function App() {
         // Load balances/shares if account already connected
         if (currentAccount && tokensContracts && tokensContracts.length > 0 && dBankContract) {
           await loadBalances(dBankContract, tokensContracts, currentAccount, dispatch);
+          await loadDepositors(dBankContract, dispatch);
           // Load user allocations
           if (strategyRouterContract) {
             await loadUserStrategyAllocations(strategyRouterContract, currentAccount, dispatch);

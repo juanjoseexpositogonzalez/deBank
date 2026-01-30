@@ -1,4 +1,4 @@
-import { Card, Button, Spinner } from 'react-bootstrap';
+import { Card, Button, Spinner, Table } from 'react-bootstrap';
 import Form from 'react-bootstrap/Form';
 import InputGroup from 'react-bootstrap/InputGroup';
 import Row from 'react-bootstrap/Row';
@@ -10,9 +10,10 @@ import {
     depositFunds,
     depositViaX402,
     loadBalances,
+    loadDepositors,
 } from '../store/interactions';
 import { isX402Available } from '../utils/x402Config';
-import { formatWithMaxDecimals, getExplorerUrl } from '../utils/format';
+import { formatWithMaxDecimals, getExplorerUrl, truncateAddress } from '../utils/format';
 
 import { useSelector, useDispatch } from 'react-redux';
 import { useState, useEffect, useRef } from 'react';
@@ -43,6 +44,8 @@ const Deposit = () => {
     const shares = useSelector(state => state.dBank.shares);
     const balances = useSelector(state => state.tokens.balances);
     const dBank = useSelector(state => state.dBank.contract);
+    const depositorsList = useSelector(state => state.dBank.depositors.list);
+    const depositorsLoading = useSelector(state => state.dBank.depositors.isLoading);
 
     const dispatch = useDispatch();
 
@@ -87,6 +90,7 @@ const Deposit = () => {
                 try {
                     console.log('Refreshing balances due to deposit success...');
                     await loadBalances(dBank, tokens, account, dispatch);
+                    await loadDepositors(dBank, dispatch);
                     console.log('Balances refreshed from useEffect after deposit success');
                 } catch (error) {
                     console.error('Error refreshing balances in useEffect:', error);
@@ -95,6 +99,15 @@ const Deposit = () => {
             return () => clearTimeout(timer);
         }
     }, [isDepositSuccess, dBank, tokens, account, dispatch]);
+
+    // Periodic refresh of depositors (every 30s)
+    useEffect(() => {
+        if (!dBank) return;
+        const interval = setInterval(() => {
+            loadDepositors(dBank, dispatch);
+        }, 30000);
+        return () => clearInterval(interval);
+    }, [dBank, dispatch]);
 
     const explorerBaseUrl = getExplorerUrl(chainId);
     
@@ -432,6 +445,35 @@ const Deposit = () => {
                     Please connect your wallet
                 </p>
             )}
+            </Card>
+
+            {/* Depositors Table */}
+            <Card style={{ maxWidth: '450px' }} className='mx-auto mt-4 px-3 py-3'>
+                <h6 className='text-center mb-3' style={{ color: '#f8f9fa' }}>Vault Depositors</h6>
+                {depositorsLoading ? (
+                    <div className='text-center py-3'>
+                        <Spinner animation="border" size="sm" />
+                    </div>
+                ) : depositorsList && depositorsList.length > 0 ? (
+                    <Table striped bordered hover size="sm" variant="dark" style={{ fontSize: '0.85rem' }}>
+                        <thead>
+                            <tr>
+                                <th>Address</th>
+                                <th className='text-end'>Amount ({symbols && symbols[0]})</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {depositorsList.map((d, i) => (
+                                <tr key={i}>
+                                    <td title={d.address}>{truncateAddress(d.address)}</td>
+                                    <td className='text-end'>{formatWithMaxDecimals(d.usdcValue)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </Table>
+                ) : (
+                    <p className='text-center text-muted mb-0' style={{ fontSize: '0.85rem' }}>No depositors yet</p>
+                )}
             </Card>
 
             {isDepositing ? (
