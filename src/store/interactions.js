@@ -557,13 +557,33 @@ export const loadBalances = async(dBank, tokens, account, dispatch) => {
 
 // ----------------------------------------------------------
 // LOAD DEPOSITORS (from Deposit events)
+// Uses a single totalAssets/totalSupply snapshot for all depositors
+// to ensure consistency with the rest of the UI.
 export const loadDepositors = async (dBank, dispatch) => {
     try {
         dispatch(setDepositorsLoading(true));
 
-        // Query all Deposit events to find unique depositor addresses
-        const depositFilter = dBank.filters.Deposit();
-        const depositEvents = await dBank.queryFilter(depositFilter);
+        // Fetch totalAssets and totalSupply ONCE for consistent calculations
+        const totalAssetsBN = await dBank.totalAssets();
+        const totalSupplyBN = await dBank.totalSupply();
+
+        // Query Deposit events to find unique depositor addresses
+        let depositEvents = [];
+        try {
+            const depositFilter = dBank.filters.Deposit();
+            depositEvents = await dBank.queryFilter(depositFilter);
+        } catch (filterError) {
+            // Public RPCs may reject unbounded log queries; retry with explicit range
+            console.warn('queryFilter failed, retrying with explicit block range:', filterError.message);
+            try {
+                const depositFilter = dBank.filters.Deposit();
+                depositEvents = await dBank.queryFilter(depositFilter, 0, 'latest');
+            } catch (retryError) {
+                console.error('queryFilter retry failed:', retryError.message);
+                dispatch(setDepositorsList([]));
+                return;
+            }
+        }
 
         // Collect unique depositor addresses from the 'owner' field (share receiver)
         const uniqueAddresses = new Set();
@@ -571,20 +591,17 @@ export const loadDepositors = async (dBank, dispatch) => {
             uniqueAddresses.add(event.args.owner);
         }
 
-        // For each unique depositor, get current shares and USDC value
+        // For each unique depositor, get current shares and compute USDC value locally
         const depositorsList = [];
         for (const addr of uniqueAddresses) {
             const sharesBN = await dBank.balanceOf(addr);
             if (sharesBN.lte(0)) continue;
 
-            // Use contract's convertToAssets (canonical ERC-4626 conversion)
-            let usdcValueBN;
-            try {
-                usdcValueBN = await dBank.convertToAssets(sharesBN);
-            } catch (conversionError) {
-                console.warn(`convertToAssets failed for ${addr}, using shares as fallback:`, conversionError.message);
-                usdcValueBN = sharesBN;
-            }
+            // Compute USDC value locally: shares * totalAssets / totalSupply
+            // This uses the same snapshot as loadBalances, avoiding timing discrepancies
+            const usdcValueBN = totalSupplyBN.gt(0)
+                ? sharesBN.mul(totalAssetsBN).div(totalSupplyBN)
+                : ethers.BigNumber.from(0);
 
             depositorsList.push({
                 address: addr,
@@ -599,7 +616,7 @@ export const loadDepositors = async (dBank, dispatch) => {
         dispatch(setDepositorsList(depositorsList));
     } catch (error) {
         console.error('Error loading depositors:', error);
-        dispatch(setDepositorsLoading(false));
+        dispatch(setDepositorsList([]));
     }
 }
 
