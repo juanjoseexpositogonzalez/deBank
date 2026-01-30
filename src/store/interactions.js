@@ -565,22 +565,24 @@ export const loadDepositors = async (dBank, dispatch) => {
         const depositFilter = dBank.filters.Deposit();
         const depositEvents = await dBank.queryFilter(depositFilter);
 
-        // Collect unique depositor addresses from the 'owner' field
+        // Collect unique depositor addresses from the 'owner' field (share receiver)
         const uniqueAddresses = new Set();
         for (const event of depositEvents) {
             uniqueAddresses.add(event.args.owner);
         }
 
-        // For each unique depositor, get current balance and convert to assets
+        // For each unique depositor, get current shares and USDC value
         const depositorsList = [];
         for (const addr of uniqueAddresses) {
             const sharesBN = await dBank.balanceOf(addr);
             if (sharesBN.lte(0)) continue;
 
+            // Use contract's convertToAssets (canonical ERC-4626 conversion)
             let usdcValueBN;
             try {
                 usdcValueBN = await dBank.convertToAssets(sharesBN);
-            } catch {
+            } catch (conversionError) {
+                console.warn(`convertToAssets failed for ${addr}, using shares as fallback:`, conversionError.message);
                 usdcValueBN = sharesBN;
             }
 
@@ -660,9 +662,11 @@ export const depositFunds = async (provider, dBank, tokens, account, usdcAmount,
                     if (decoded.name === 'dBank__CapExceeded') {
                         const requested = ethers.utils.formatUnits(decoded.args[0], 18);
                         const available = ethers.utils.formatUnits(decoded.args[1], 18);
-                        errorMessage = `Deposit cap exceeded. Requested: ${requested} tokens, Available: ${available} tokens`;
+                        errorMessage = `Deposit cap exceeded. Requested: ${requested}, Cap available: ${available}. Max deposit: ${available} tokens.`;
                     } else if (decoded.name === 'dBank__InsufficientLiquidity') {
-                        errorMessage = 'Insufficient liquidity in vault';
+                        const requested = ethers.utils.formatUnits(decoded.args[0], 18);
+                        const available = ethers.utils.formatUnits(decoded.args[1], 18);
+                        errorMessage = `Insufficient liquidity. Requested: ${requested}, Available: ${available} tokens.`;
                     } else if (decoded.name === 'dBank__InvalidAmount') {
                         errorMessage = 'Invalid deposit amount';
                     } else if (decoded.name === 'dBank__Paused') {
@@ -940,12 +944,29 @@ const parseWithdrawError = (error) => {
     if (errorString.includes('dBank__InsufficientShares')) {
         return 'Cannot withdraw: Insufficient shares balance.';
     }
-    
+
     if (errorString.includes('dBank__InsufficientLiquidity')) {
+        // Try to extract amounts
+        const match = errorString.match(/dBank__InsufficientLiquidity\((\d+),\s*(\d+)\)/);
+        if (match) {
+            try {
+                const requested = ethers.utils.formatUnits(match[1], 18);
+                const available = ethers.utils.formatUnits(match[2], 18);
+                return `Cannot withdraw: Insufficient liquidity. Requested: ${parseFloat(requested).toFixed(4)}, Available: ${parseFloat(available).toFixed(4)} tokens.`;
+            } catch { /* fallthrough */ }
+        }
         return 'Cannot withdraw: Insufficient liquidity in the vault. Please try a smaller amount or wait for more liquidity.';
     }
-    
+
     if (errorString.includes('dBank__CapExceeded')) {
+        const match = errorString.match(/dBank__CapExceeded\((\d+),\s*(\d+)\)/);
+        if (match) {
+            try {
+                const requested = ethers.utils.formatUnits(match[1], 18);
+                const cap = ethers.utils.formatUnits(match[2], 18);
+                return `Cannot withdraw: Cap exceeded. Requested: ${parseFloat(requested).toFixed(4)}, Cap: ${parseFloat(cap).toFixed(4)} tokens.`;
+            } catch { /* fallthrough */ }
+        }
         return 'Cannot withdraw: Amount exceeds the withdrawal cap.';
     }
     
@@ -1139,7 +1160,15 @@ export const allocateToStrategy = async (provider, strategyRouter, tokens, accou
         // Check for common revert reasons
         if (errorMessage.includes('execution reverted')) {
             if (errorMessage.includes('StrategyRouter__CapExceeded')) {
-                errorMessage = 'Cap exceeded for this strategy. Please reduce the amount.';
+                try {
+                    const strategyInfo = await strategyRouter.getStrategy(strategyId);
+                    const cap = ethers.utils.formatUnits(strategyInfo.cap, 18);
+                    const allocated = ethers.utils.formatUnits(strategyInfo.allocated, 18);
+                    const available = ethers.utils.formatUnits(strategyInfo.cap.sub(strategyInfo.allocated), 18);
+                    errorMessage = `Strategy cap exceeded. Cap: ${cap}, Already allocated: ${allocated}, Available: ${available}. Please reduce the amount.`;
+                } catch {
+                    errorMessage = 'Cap exceeded for this strategy. Please reduce the amount.';
+                }
             } else if (errorMessage.includes('StrategyRouter__StrategyPaused')) {
                 errorMessage = 'This strategy is currently paused.';
             } else if (errorMessage.includes('StrategyRouter__StrategyNotActive')) {
@@ -1162,20 +1191,13 @@ export const allocateToStrategy = async (provider, strategyRouter, tokens, accou
 export const unallocateFromStrategy = async (provider, strategyRouter, tokens, account, amount, strategyId, dispatch, maxSlippageBps = 50) => {
     try {
         const signer = provider.getSigner();
-        let amountInWei = ethers.utils.parseUnits(amount, 18);
-
-        const routerWithSigner = strategyRouter.connect(signer);
-
-        // Ensure router holds tokens to return; approval not required for withdrawFromStrategy
-        const routerBalance = await tokens[0].balanceOf(strategyRouter.address);
-        if (routerBalance.lt(amountInWei)) {
-            console.warn('Router balance lower than requested un-allocation; capping to available balance.');
-            amountInWei = routerBalance;
-        }
+        const amountInWei = ethers.utils.parseUnits(amount, 18);
 
         if (amountInWei.isZero()) {
-            return { ok: false, hash: null, error: 'Router has no liquidity for un-allocation.' };
+            return { ok: false, hash: null, error: 'Amount must be greater than zero.' };
         }
+
+        const routerWithSigner = strategyRouter.connect(signer);
 
         const tx = await routerWithSigner.withdrawFromStrategy(strategyId, amountInWei, maxSlippageBps);
         await tx.wait();
@@ -1185,10 +1207,30 @@ export const unallocateFromStrategy = async (provider, strategyRouter, tokens, a
         // Reload user allocations
         await loadUserStrategyAllocations(strategyRouter, account, dispatch);
 
+        // Reload token balance (user gets tokens back in wallet)
+        if (tokens && tokens.length > 0 && account) {
+            const updatedBalance = await tokens[0].balanceOf(account);
+            dispatch(balancesLoaded([ethers.utils.formatUnits(updatedBalance, 18)]));
+        }
+
         return { ok: true, hash: tx.hash };
     } catch (error) {
         console.error("unallocateFromStrategy error:", error);
-        return { ok: false, hash: null, error: error.message };
+
+        let errorMessage = error.message || 'Unknown error';
+        if (error.reason) {
+            errorMessage = error.reason;
+        }
+        // Parse common revert reasons
+        if (errorMessage.includes('StrategyRouter__InsufficientBalance')) {
+            errorMessage = 'Insufficient balance in strategy. The strategy may not have enough liquidity.';
+        } else if (errorMessage.includes('Transfer failed')) {
+            errorMessage = 'Token transfer failed. The router may not have enough liquidity to return your tokens.';
+        } else if (errorMessage.includes('user rejected') || errorMessage.includes('User denied')) {
+            errorMessage = 'Transaction was rejected by the user.';
+        }
+
+        return { ok: false, hash: null, error: errorMessage };
     }
 }
 // ----------------------------------------------------------

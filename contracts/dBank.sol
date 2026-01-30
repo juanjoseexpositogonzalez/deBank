@@ -190,11 +190,22 @@ contract dBank {
     }
 
     function maxWithdraw(address _owner) external view returns (uint256) {
-        return this.convertToAssets(balanceOf[_owner]);
+        uint256 ownerAssets = this.convertToAssets(balanceOf[_owner]);
+        if (perTxCap > 0 && ownerAssets > perTxCap) {
+            return perTxCap;
+        }
+        return ownerAssets;
     }
 
     function maxRedeem(address _owner) external view returns (uint256) {
-        return balanceOf[_owner];
+        uint256 ownerShares = balanceOf[_owner];
+        if (perTxCap > 0) {
+            uint256 capShares = this.convertToShares(perTxCap);
+            if (ownerShares > capShares) {
+                return capShares;
+            }
+        }
+        return ownerShares;
     }
 
     // Preview functions
