@@ -45,18 +45,18 @@ describe('Integration Flow', () => {
         await token.connect(user).approve(strategyRouter.address, tokens(10000));
     });
 
-    it('happy path: un-allocate then withdraw after yield accrual', async () => {
-        // 1. User deposits 5000
+    it('happy path: vault allocation earns yield, user withdraws', async () => {
+        // 1. User deposits 5000 to vault
         await dbank.connect(user).deposit(tokens(5000), user.address);
 
-        // 2. User allocates 3500 to strategy
-        await strategyRouter.connect(user).depositToStrategy(1, tokens(3500));
+        // 2. Owner allocates 3500 from vault buffer to strategy
+        await dbank.connect(deployer).allocate(1, tokens(3500));
 
         // Record assets for shares before yield
         const shares = await dbank.balanceOf(user.address);
         const assetsBefore = await dbank.convertToAssets(shares);
 
-        // 3. Advance time 1 year
+        // 3. Advance time 1 year (strategy accrues 5% yield)
         await ethers.provider.send('evm_increaseTime', [YEAR]);
         await ethers.provider.send('evm_mine', []);
 
@@ -72,10 +72,7 @@ describe('Integration Flow', () => {
             await token.transfer(strategyRouter.address, yieldAmount);
         }
 
-        // User un-allocates from strategy
-        await strategyRouter.connect(user).withdrawFromStrategy(1, strategyTotalAssets, 100);
-
-        // User withdraws from vault successfully
+        // User withdraws original deposit - vault auto-pulls from strategy
         await expect(
             dbank.connect(user).withdraw(tokens(5000), user.address, user.address)
         ).to.not.be.reverted;

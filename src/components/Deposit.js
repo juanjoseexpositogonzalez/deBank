@@ -40,8 +40,9 @@ const Deposit = () => {
     const account = useSelector(state => state.provider.account);
     const tokens = useSelector(state => state.tokens.contracts);
     const symbols = useSelector(state => state.tokens.symbols);
-    const dBankSymbol = useSelector(state => state.dBank.symbol);    
+    const dBankSymbol = useSelector(state => state.dBank.symbol);
     const shares = useSelector(state => state.dBank.shares);
+    const totalAssets = useSelector(state => state.dBank.assets);
     const balances = useSelector(state => state.tokens.balances);
     const dBank = useSelector(state => state.dBank.contract);
     const depositorsList = useSelector(state => state.dBank.depositors.list);
@@ -311,11 +312,18 @@ const Deposit = () => {
             <Card style={{ maxWidth: '450px'}} className='mx-auto px-4'>
             {account ? (
                 <Form onSubmit={depositHandler} style={{ maxWidht: '450px', margin: '50px auto'}}>
-                    {/* Vault position indicator */}
-                    {parseFloat(vaultValue) > 0 && (
+                    {/* Vault totals and user position */}
+                    {totalAssets && parseFloat(totalAssets) > 0 && (
                         <Row>
                             <Form.Text className='text-center my-2' style={{ color: '#20c997', fontSize: '0.95rem', fontWeight: '500' }}>
-                                In Vault: {formatWithMaxDecimals(vaultValue)} {symbols && symbols[0]}
+                                Total in Vault: {formatWithMaxDecimals(totalAssets)} {symbols && symbols[0]}
+                            </Form.Text>
+                        </Row>
+                    )}
+                    {parseFloat(vaultValue) > 0 && (
+                        <Row>
+                            <Form.Text className='text-center my-1' style={{ color: '#adb5bd', fontSize: '0.85rem' }}>
+                                Your position: {formatWithMaxDecimals(vaultValue)} {symbols && symbols[0]}
                                 {' '}({formatWithMaxDecimals(shares)} {dBankSymbol})
                             </Form.Text>
                         </Row>

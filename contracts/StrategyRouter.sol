@@ -163,6 +163,43 @@ contract StrategyRouter {
     }
 
     /**
+     * @notice Get a user's proportional share of strategy assets (includes yield)
+     * @param _user Address of the user (can be an EOA or the vault contract)
+     * @return Total assets attributable to the user across all active strategies
+     */
+    function userTotalAssets(address _user) external view returns (uint256) {
+        uint256 total = 0;
+
+        for (uint256 i = 1; i <= MAX_STRATEGIES; i++) {
+            address strategy = strategies[i];
+            if (strategy == address(0) || !strategyActive[i]) continue;
+
+            uint256 allocated = strategyAllocated[i];
+            if (allocated == 0) continue;
+
+            uint256 userAlloc = userStrategyAllocations[_user][i];
+            if (userAlloc == 0) continue;
+
+            // Check if strategy is paused
+            (bool pausedSuccess, bytes memory pausedData) = strategy.staticcall(
+                abi.encodeWithSignature("paused()")
+            );
+            if (pausedSuccess && abi.decode(pausedData, (bool))) continue;
+
+            // Get strategy total assets
+            (bool success, bytes memory data) = strategy.staticcall(
+                abi.encodeWithSignature("totalAssets()")
+            );
+            if (!success) continue;
+
+            uint256 strategyAssets = abi.decode(data, (uint256));
+            total += (strategyAssets * userAlloc) / allocated;
+        }
+
+        return total;
+    }
+
+    /**
      * @notice Get available capacity for a strategy
      * @param _strategyId Strategy ID
      * @return Available capacity (cap - allocated)

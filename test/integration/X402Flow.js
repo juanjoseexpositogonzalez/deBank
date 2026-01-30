@@ -117,12 +117,12 @@ describe('x402 Integration Flow', () => {
             // User deposits via x402
             const depositAmount = tokens(100);
             await dbank.connect(treasury).deposit(depositAmount, user.address);
-            
+
             const sharesBefore = await dbank.balanceOf(user.address);
             const assetsBefore = await dbank.convertToAssets(sharesBefore);
 
-            // User allocates to strategy
-            await strategyRouter.connect(user).depositToStrategy(1, tokens(50));
+            // Owner allocates vault capital to strategy
+            await dbank.connect(deployer).allocate(1, tokens(50));
 
             // Advance time to accrue yield
             await ethers.provider.send('evm_increaseTime', [YEAR]);

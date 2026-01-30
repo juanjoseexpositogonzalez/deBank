@@ -903,8 +903,9 @@ export const withdrawFunds = async (provider, dBank, tokens, account, usdcAmount
 
         dispatch(withdrawSuccess(withdrawTx.hash));
 
-        // Reload balances after withdraw (tx already confirmed via .wait())
+        // Reload balances and depositors after withdraw (tx already confirmed via .wait())
         await loadBalances(dBank, tokens, account, dispatch);
+        await loadDepositors(dBank, dispatch);
 
         return true;
     } catch (error) {

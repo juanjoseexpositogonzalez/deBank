@@ -152,7 +152,7 @@ contract dBank {
 
     // view functions
     function totalAssets() external view returns (uint256) {
-        return buffer + StrategyRouter(strategyRouter).totalAssets();
+        return buffer + StrategyRouter(strategyRouter).userTotalAssets(address(this));
     }
 
     // conversion functions
