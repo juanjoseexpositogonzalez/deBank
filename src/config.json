@@ -18,19 +18,19 @@
   },
   "84532": {
     "token": {
-      "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+      "address": "0xCB42267e7A7B74a7Aa888230596589A6322fAA1f"
     },
     "dbank": {
-      "address": "0xfe66d2eA896c8cbFaea16A7A493455657f78BF05"
+      "address": "0xf1E0Aa2BE39d481b6a525aD527Ac389B98A0A142"
     },
     "strategyRouter": {
-      "address": "0xE6AE83d21AFC2FcB5abC0C794D5fc1DBf28e9488"
+      "address": "0x7686DEC9229d20766DD326b98F991F8a579637CE"
     },
     "configManager": {
-      "address": "0x88a9e3B3ff2bCd00CF5462B53E503c64cDbEC719"
+      "address": "0xCA7976121B63cF8488e0A5D5b1fA11E8CBCAace7"
     },
     "mockS1": {
-      "address": "0x49C9e6E115452cBF124887A1C7E8114e6fCadCA0"
+      "address": "0x1035fE7bE30Cf21f3b6cA8784700A6440fE784aD"
     },
     "x402": {
       "facilitatorUrl": "http://localhost:4022",
@@ -40,19 +40,19 @@
   },
   "11155111": {
     "token": {
-      "address": "0xe1101826AF7AACAdB70041a9a420cf8B0a0Ab2C2"
+      "address": "0x7f577a40b9FCD4A974F13069529e84547747aF7E"
     },
     "dbank": {
-      "address": "0x448918B08FC8630B865CBFe5362bdA3c4cbE707B"
+      "address": "0x4164F3195A11d1Dda8d279ebD3f042A58c1590c4"
     },
     "strategyRouter": {
-      "address": "0xF7D6CAf1007CC3C94d1F0d4718917615e7A5f345"
+      "address": "0x85cf7eE7E8B17f2A9c467A565481c0CcF0a15892"
     },
     "configManager": {
-      "address": "0x13164Da8aA10603C1C615d3675F4C8276b06f578"
+      "address": "0xDbfeB09E0E6f63Ea92F86AF8Cd5e2701BD8A8e20"
     },
     "mockS1": {
-      "address": "0x1Cd0C8D0294A4E202DAb0A3A982d0Cd392317221"
+      "address": "0x46bA5ff40e10e29e08523F64789F588D2608f0D7"
     }
   }
 }

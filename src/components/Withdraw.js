@@ -1,4 +1,4 @@
-import { Card, Button, Spinner, Modal } from 'react-bootstrap';
+import { Card, Button, Spinner, Modal, Table } from 'react-bootstrap';
 import Form from 'react-bootstrap/Form';
 import InputGroup from 'react-bootstrap/InputGroup';
 import Row from 'react-bootstrap/Row';
@@ -9,8 +9,9 @@ import Alert from './Alert'
 import {
     withdrawFunds,
     loadBalances,
+    loadDepositors,
 } from '../store/interactions';
-import { formatWithMaxDecimals, getExplorerUrl } from '../utils/format';
+import { formatWithMaxDecimals, getExplorerUrl, truncateAddress } from '../utils/format';
 
 import { useSelector, useDispatch } from 'react-redux';
 import { useState, useEffect, useRef } from 'react';
@@ -34,21 +35,21 @@ const Withdraw = () => {
     const account = useSelector(state => state.provider.account);
     const tokens = useSelector(state => state.tokens.contracts);
     const symbols = useSelector(state => state.tokens.symbols);
-    const dBankSymbol = useSelector(state => state.dBank.symbol);    
+    const dBankSymbol = useSelector(state => state.dBank.symbol);
     const shares = useSelector(state => state.dBank.shares);
     const dBank = useSelector(state => state.dBank.contract);
-    const userTotalAllocated = useSelector(state => state.strategyRouter.userTotalAllocated);
-    const userTotalAllocatedValue = useSelector(state => state.strategyRouter.userTotalAllocatedValue || "0");
-    const strategyRouter = useSelector(state => state.strategyRouter.contract);
+    const depositorsList = useSelector(state => state.dBank.depositors.list);
+    const depositorsLoading = useSelector(state => state.dBank.depositors.isLoading);
 
     const dispatch = useDispatch();
 
     const explorerBaseUrl = getExplorerUrl(chainId);
 
-    // Calculate available shares for withdrawal (block if allocated)
-    const [availableShares, setAvailableShares] = useState(shares || "0");
-    
-    // Refresh balances when component mounts or when account/shares change
+    // Available shares = user's full vault balance
+    // Strategy allocations are independent (tokens go from wallet, not vault)
+    const availableShares = shares || "0";
+
+    // Refresh balances when component mounts
     useEffect(() => {
         const refreshBalances = async () => {
             if (dBank && tokens && account) {
@@ -61,81 +62,30 @@ const Withdraw = () => {
         };
         refreshBalances();
     }, [account, dBank, tokens, dispatch]);
-    
-    // También refrescar cuando cambia el estado de withdraw (después de un withdraw exitoso)
+
+    // Refresh after successful withdraw
     useEffect(() => {
         if (isWithdrawSuccess && dBank && tokens && account) {
-            // Pequeño delay para asegurar que la transacción esté confirmada
-            const timer = setTimeout(async () => {
+            const refreshAfterWithdraw = async () => {
                 try {
                     await loadBalances(dBank, tokens, account, dispatch);
-                    console.log('Balances refreshed after withdraw success');
+                    await loadDepositors(dBank, dispatch);
                 } catch (error) {
                     console.error("Error refreshing balances after withdraw:", error);
                 }
-            }, 1500);
-            return () => clearTimeout(timer);
+            };
+            refreshAfterWithdraw();
         }
     }, [isWithdrawSuccess, dBank, tokens, account, dispatch]);
-    
-    // Helper function to calculate unallocated shares for display
-    // Uses simple model: unallocatedShares = totalShares - allocatedPrincipal
-    // This is consistent with Strategies.js display
-    const calculateUnallocatedShares = async (dBank, strategyRouter, account, currentSharesBN) => {
-        try {
-            const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
-            
-            if (userTotalAllocatedBN.eq(0)) {
-                return currentSharesBN;
-            }
-            
-            // Simple model: unallocated = total - allocated principal
-            const unallocatedSharesBN = currentSharesBN.gt(userTotalAllocatedBN)
-                ? currentSharesBN.sub(userTotalAllocatedBN)
-                : ethers.BigNumber.from(0);
-            
-            console.log('calculateUnallocatedShares:', {
-                currentShares: ethers.utils.formatUnits(currentSharesBN, 18),
-                allocatedPrincipal: ethers.utils.formatUnits(userTotalAllocatedBN, 18),
-                unallocatedShares: ethers.utils.formatUnits(unallocatedSharesBN, 18)
-            });
-            
-            return unallocatedSharesBN;
-        } catch (error) {
-            console.error("Error calculating unallocated shares:", error);
-            return currentSharesBN;
-        }
-    };
 
+    // Periodic refresh of depositors (every 30s)
     useEffect(() => {
-        const calculateAvailableShares = async () => {
-            if (!shares || !dBank || !strategyRouter || !account) {
-                setAvailableShares(shares || "0");
-                return;
-            }
-            try {
-                // Get current user shares from contract
-                const currentSharesBN = await dBank.balanceOf(account);
-                const currentShares = parseFloat(ethers.utils.formatUnits(currentSharesBN, 18));
-                
-                if (currentShares <= 0) {
-                    setAvailableShares("0");
-                    return;
-                }
-                
-                // Use helper function to calculate unallocated shares
-                // This now uses the simple formula: unallocatedShares = totalShares - allocatedPrincipal
-                const unallocatedSharesBN = await calculateUnallocatedShares(dBank, strategyRouter, account, currentSharesBN);
-                const unallocatedShares = ethers.utils.formatUnits(unallocatedSharesBN, 18);
-                
-                setAvailableShares(unallocatedShares);
-            } catch (error) {
-                console.error("Error calculating available shares:", error);
-                setAvailableShares(shares || "0");
-            }
-        };
-        calculateAvailableShares();
-    }, [shares, dBank, strategyRouter, userTotalAllocated, userTotalAllocatedValue, account]);
+        if (!dBank) return;
+        const interval = setInterval(() => {
+            loadDepositors(dBank, dispatch);
+        }, 30000);
+        return () => clearInterval(interval);
+    }, [dBank, dispatch]);
 
     // Validate withdrawal before showing confirmation modal
     const handleWithdrawClick = async (e) => {
@@ -147,9 +97,7 @@ const Withdraw = () => {
             return;
         }
 
-        // CRITICAL: Always validate allocated shares before withdrawal
-        // Get fresh data from contracts to ensure accuracy
-        if (!dBank || !strategyRouter || !account) {
+        if (!dBank || !account) {
             alert("Error: Contracts not loaded. Please refresh the page.");
             return;
         }
@@ -244,9 +192,9 @@ const Withdraw = () => {
         }, 300);
     }
 
-    // Max on asset input - uses simple 1:1 model consistent with Strategies.js
+    // Max on asset input - sets to full vault balance
     const maxHandlerBalance = async () => {
-        if (!dBank || !strategyRouter || !account) return;
+        if (!dBank || !account) return;
 
         try {
             const currentSharesBN = await dBank.balanceOf(account);
@@ -255,27 +203,17 @@ const Withdraw = () => {
                 return;
             }
 
-            const unallocatedSharesBN = await calculateUnallocatedShares(dBank, strategyRouter, account, currentSharesBN);
-
-            if (unallocatedSharesBN.lte(0)) {
-                alert("You don't have any unallocated shares available to withdraw. Unallocate first.");
-                return;
-            }
-
-            // Simple 1:1 model: shares = USDC value (consistent with Strategies.js)
-            const availableShares = ethers.utils.formatUnits(unallocatedSharesBN, 18);
-            
-            setSharesAmount(availableShares);
-            setUsdcAmount(availableShares); // 1:1
+            const assetsBN = await dBank.convertToAssets(currentSharesBN);
+            setUsdcAmount(ethers.utils.formatUnits(assetsBN, 18));
+            setSharesAmount(ethers.utils.formatUnits(currentSharesBN, 18));
         } catch (error) {
             console.error("Max conversion error:", error);
-            alert(`Error calculating max withdrawal: ${error.message || 'Unknown error'}`);
         }
     }
 
-    // Max on shares input - uses simple 1:1 model consistent with Strategies.js
+    // Max on shares input - sets to full vault balance
     const maxHandlerShares = async () => {
-        if (!dBank || !strategyRouter || !account) return;
+        if (!dBank || !account) return;
 
         try {
             const currentSharesBN = await dBank.balanceOf(account);
@@ -284,21 +222,11 @@ const Withdraw = () => {
                 return;
             }
 
-            const unallocatedSharesBN = await calculateUnallocatedShares(dBank, strategyRouter, account, currentSharesBN);
-
-            if (unallocatedSharesBN.lte(0)) {
-                alert("You don't have any unallocated shares available to withdraw. Unallocate first.");
-                return;
-            }
-
-            // Simple 1:1 model: shares = USDC value (consistent with Strategies.js)
-            const availableShares = ethers.utils.formatUnits(unallocatedSharesBN, 18);
-            
-            setSharesAmount(availableShares);
-            setUsdcAmount(availableShares); // 1:1
+            const assetsBN = await dBank.convertToAssets(currentSharesBN);
+            setUsdcAmount(ethers.utils.formatUnits(assetsBN, 18));
+            setSharesAmount(ethers.utils.formatUnits(currentSharesBN, 18));
         } catch (error) {
             console.error("Max shares conversion error:", error);
-            alert(`Error calculating max withdrawal: ${error.message || 'Unknown error'}`);
         }
     }
 
@@ -348,11 +276,6 @@ const Withdraw = () => {
                     <Row className='my-3'>                        
                         <Form.Text className='text-end my-2' style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
                             Shares: {formatWithMaxDecimals(shares)}
-                            {availableShares && parseFloat(availableShares) > 0 && parseFloat(availableShares) < parseFloat(shares || "0") && (
-                                <span style={{ color: '#ffc107', marginLeft: '8px' }}>
-                                    (Available: {formatWithMaxDecimals(availableShares)})
-                                </span>
-                            )}
                             {shares && parseFloat(shares) > 0 && (
                                 <span
                                     onClick={maxHandlerShares}
@@ -414,6 +337,35 @@ const Withdraw = () => {
                     Please connect your wallet
                 </p>
             )}
+            </Card>
+
+            {/* Depositors Table */}
+            <Card style={{ maxWidth: '450px' }} className='mx-auto mt-4 px-3 py-3'>
+                <h6 className='text-center mb-3' style={{ color: '#f8f9fa' }}>Vault Depositors</h6>
+                {depositorsLoading ? (
+                    <div className='text-center py-3'>
+                        <Spinner animation="border" size="sm" />
+                    </div>
+                ) : depositorsList && depositorsList.length > 0 ? (
+                    <Table striped bordered hover size="sm" variant="dark" style={{ fontSize: '0.85rem' }}>
+                        <thead>
+                            <tr>
+                                <th>Address</th>
+                                <th className='text-end'>Amount ({symbols && symbols[0]})</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {depositorsList.map((d, i) => (
+                                <tr key={i}>
+                                    <td title={d.address}>{truncateAddress(d.address)}</td>
+                                    <td className='text-end'>{formatWithMaxDecimals(d.usdcValue)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </Table>
+                ) : (
+                    <p className='text-center text-muted mb-0' style={{ fontSize: '0.85rem' }}>No depositors yet</p>
+                )}
             </Card>
 
             {isWithdrawing ? (
