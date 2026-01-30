@@ -48,6 +48,9 @@ describe('x402 Integration Flow', () => {
         // Approve dBank for user
         await token.connect(user).approve(dbank.address, tokens(10000));
 
+        // Approve strategyRouter for user (for strategy deposits)
+        await token.connect(user).approve(strategyRouter.address, tokens(10000));
+
         // Approve dBank for treasury (for x402 deposits)
         await token.connect(treasury).approve(dbank.address, tokens(50000));
 

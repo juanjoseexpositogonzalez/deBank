@@ -25,7 +25,7 @@ describe('x402 End-to-End Integration', () => {
     const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:4021';
     const NETWORK = 'eip155:84532';
 
-    before(async () => {
+    before(async function() {
         [deployer, user, treasury] = await ethers.getSigners();
 
         // Deploy contracts
