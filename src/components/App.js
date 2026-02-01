@@ -75,9 +75,9 @@ function App() {
           const currentAccount = ethers.utils.getAddress(accounts[0]);
           await loadBalances(nextDBank, nextTokens, currentAccount, dispatch);
           await loadDepositors(nextDBank, dispatch);
-          // Load user allocations
-          if (strategyRouterContract) {
-            await loadUserStrategyAllocations(strategyRouterContract, currentAccount, dispatch);
+          // Load user allocations (reads from dBank, needs router for strategy metadata)
+          if (nextDBank) {
+            await loadUserStrategyAllocations(nextDBank, currentAccount, dispatch, strategyRouterContract);
           }
           // Load chart data
           await loadChartData(nextProvider, nextDBank, strategyRouterContract, currentAccount, dispatch);
@@ -112,9 +112,9 @@ function App() {
           if (freshDBank && freshTokens && freshTokens.length > 0) {
             await loadBalances(freshDBank, freshTokens, newAccount, dispatch);
             await loadDepositors(freshDBank, dispatch);
-            // Load user allocations
-            if (strategyRouterContract) {
-              await loadUserStrategyAllocations(strategyRouterContract, newAccount, dispatch);
+            // Load user allocations (reads from dBank, needs router for strategy metadata)
+            if (freshDBank) {
+              await loadUserStrategyAllocations(freshDBank, newAccount, dispatch, strategyRouterContract);
             }
             // Load chart data
             await loadChartData(freshProvider, freshDBank, strategyRouterContract, newAccount, dispatch);
@@ -157,9 +157,9 @@ function App() {
         if (currentAccount && tokensContracts && tokensContracts.length > 0 && dBankContract) {
           await loadBalances(dBankContract, tokensContracts, currentAccount, dispatch);
           await loadDepositors(dBankContract, dispatch);
-          // Load user allocations
-          if (strategyRouterContract) {
-            await loadUserStrategyAllocations(strategyRouterContract, currentAccount, dispatch);
+          // Load user allocations (reads from dBank, needs router for strategy metadata)
+          if (dBankContract) {
+            await loadUserStrategyAllocations(dBankContract, currentAccount, dispatch, strategyRouterContract);
           }
           // Load chart data
           await loadChartData(provider, dBankContract, strategyRouterContract, currentAccount, dispatch);

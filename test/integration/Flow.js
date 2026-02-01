@@ -39,10 +39,9 @@ describe('Integration Flow', () => {
         await dbank.setTvlCap(tokens(1000000));
         await dbank.setPerTxCap(tokens(1000000));
 
-        // Fund user and approve
+        // Fund user and approve dBank only
         await token.transfer(user.address, tokens(10000));
         await token.connect(user).approve(dbank.address, tokens(10000));
-        await token.connect(user).approve(strategyRouter.address, tokens(10000));
     });
 
     it('happy path: vault allocation earns yield, user withdraws up to buffer', async () => {
@@ -85,87 +84,95 @@ describe('Integration Flow', () => {
         expect(await dbank.buffer()).to.equal(0);
     });
 
-    it('withdraw succeeds regardless of strategy allocations (within buffer)', async () => {
+    it('user allocates via dBank, withdrawal limited to unallocated', async () => {
         // 1. User deposits 5000
         await dbank.connect(user).deposit(tokens(5000), user.address);
 
-        // 2. User allocates 3500 to strategy (from wallet)
-        await strategyRouter.connect(user).depositToStrategy(1, tokens(3500));
+        // 2. User allocates 3500 to strategy via dBank.allocateForUser
+        await dbank.connect(user).allocateForUser(1, tokens(3500));
 
-        // 3. Strategy allocations are independent of vault shares
-        //    maxWithdraw = min(ownerAssets=5000, buffer=5000) = 5000
-        await expect(
-            dbank.connect(user).withdraw(tokens(2000), user.address, user.address)
-        ).to.not.be.reverted;
-    });
+        // 3. maxWithdraw = unallocated = 1500
+        expect(await dbank.maxWithdraw(user.address)).to.equal(tokens(1500));
 
-    it('withdraw succeeds within unallocated shares when user has allocations', async () => {
-        // 1. User deposits 5000
-        await dbank.connect(user).deposit(tokens(5000), user.address);
-
-        // 2. User allocates 3500 to strategy (from wallet)
-        await strategyRouter.connect(user).depositToStrategy(1, tokens(3500));
-
-        // 3. Unallocated = 5000 - 3500 = 1500 shares worth of assets
-        //    Withdrawing 1500 is within unallocated -> succeeds
+        // 4. Can withdraw unallocated portion
         await expect(
             dbank.connect(user).withdraw(tokens(1500), user.address, user.address)
         ).to.not.be.reverted;
+
+        // 5. Cannot withdraw more (0 unallocated remaining)
+        expect(await dbank.maxWithdraw(user.address)).to.equal(0);
     });
 
-    it('un-allocate then withdraw shares after yield accrual', async () => {
+    it('user allocates and unallocates, then withdraws full', async () => {
         // 1. User deposits 5000
         await dbank.connect(user).deposit(tokens(5000), user.address);
 
         // 2. User allocates 3500 to strategy
-        await strategyRouter.connect(user).depositToStrategy(1, tokens(3500));
+        await dbank.connect(user).allocateForUser(1, tokens(3500));
 
-        // 3. Advance time 1 year
-        await ethers.provider.send('evm_increaseTime', [YEAR]);
-        await ethers.provider.send('evm_mine', []);
+        // 3. maxWithdraw = 1500
+        expect(await dbank.maxWithdraw(user.address)).to.equal(tokens(1500));
 
-        // Provide router liquidity to cover virtual yield
-        const principal = await mockS1.principal();
-        const strategyTotalAssets = await mockS1.totalAssets();
-        const yieldAmount = strategyTotalAssets.sub(principal);
-        if (yieldAmount.gt(0)) {
-            await token.transfer(strategyRouter.address, yieldAmount);
-        }
+        // 4. Unallocate 3500
+        await dbank.connect(user).unallocateForUser(1, tokens(3500), 100);
 
-        // 4. User un-allocates from strategy (withdraws full position)
-        await strategyRouter.connect(user).withdrawFromStrategy(1, strategyTotalAssets, 100);
+        // 5. maxWithdraw = 5000 (fully unallocated)
+        expect(await dbank.maxWithdraw(user.address)).to.equal(tokens(5000));
 
-        // 5. User withdraws from vault successfully
+        // 6. Full withdrawal succeeds
         await expect(
             dbank.connect(user).withdraw(tokens(5000), user.address, user.address)
         ).to.not.be.reverted;
+
+        expect(await dbank.balanceOf(user.address)).to.equal(0);
     });
 
-    it('un-allocate then withdraw assets (explicit withdraw flow)', async () => {
+    it('un-allocate after yield accrual', async () => {
         // 1. User deposits 5000
         await dbank.connect(user).deposit(tokens(5000), user.address);
 
-        // 2. User allocates 3500 to strategy
-        await strategyRouter.connect(user).depositToStrategy(1, tokens(3500));
+        // 2. User allocates 3500 via dBank
+        await dbank.connect(user).allocateForUser(1, tokens(3500));
 
-        // 3. Advance time 1 year
+        // 3. Owner also allocates some buffer for vault-level yield
+        await dbank.connect(deployer).allocate(1, tokens(500));
+        // Buffer = 1000
+
+        // 4. Advance time 1 year
         await ethers.provider.send('evm_increaseTime', [YEAR]);
         await ethers.provider.send('evm_mine', []);
 
-        // Provide router liquidity to cover virtual yield
-        const principal = await mockS1.principal();
-        const strategyTotalAssets = await mockS1.totalAssets();
-        const yieldAmount = strategyTotalAssets.sub(principal);
-        if (yieldAmount.gt(0)) {
-            await token.transfer(strategyRouter.address, yieldAmount);
-        }
+        // 5. User un-allocates from strategy
+        await dbank.connect(user).unallocateForUser(1, tokens(3500), 100);
 
-        // 4. User un-allocates from strategy
-        await strategyRouter.connect(user).withdrawFromStrategy(1, strategyTotalAssets, 100);
+        // 6. Now fully unallocated, but buffer may be limited
+        expect(await dbank.getUserTotalAllocated(user.address)).to.equal(0);
 
-        // 5. Withdraw a partial amount (assets-based withdrawal)
+        // 7. maxWithdraw is capped by buffer
+        const maxW = await dbank.maxWithdraw(user.address);
+        const buffer = await dbank.buffer();
+        expect(maxW).to.equal(buffer);
+
+        // 8. Withdraw up to buffer succeeds
         await expect(
-            dbank.connect(user).withdraw(tokens(1500), user.address, user.address)
+            dbank.connect(user).withdraw(maxW, user.address, user.address)
         ).to.not.be.reverted;
+    });
+
+    it('allocateForUser is atomic: reverts if strategy deposit fails', async () => {
+        // 1. User deposits 5000
+        await dbank.connect(user).deposit(tokens(5000), user.address);
+
+        // 2. Pause the strategy
+        await mockS1.pause(true);
+
+        // 3. allocateForUser should revert atomically
+        await expect(
+            dbank.connect(user).allocateForUser(1, tokens(3000))
+        ).to.be.reverted;
+
+        // 4. State unchanged: buffer and allocations unchanged
+        expect(await dbank.buffer()).to.equal(tokens(5000));
+        expect(await dbank.getUserTotalAllocated(user.address)).to.equal(0);
     });
 });

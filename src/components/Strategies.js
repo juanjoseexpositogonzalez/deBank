@@ -249,7 +249,7 @@ const Strategies = () => {
               await loadBalances(dBank, tokens, account, dispatch);
             }
             if (strategyRouter && account) {
-              await loadUserStrategyAllocations(strategyRouter, account, dispatch);
+              await loadUserStrategyAllocations(dBank, account, dispatch, strategyRouter);
             }
             if (provider && chainId) {
               await loadStrategyRouter(provider, chainId, dispatch);
@@ -290,7 +290,7 @@ const Strategies = () => {
           }
         }
       } else {
-        const res = await unallocateFromStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch, 50);
+        const res = await unallocateFromStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch, 50, dBank);
         ok = res.ok;
         hash = res.hash || null;
       }
@@ -303,10 +303,10 @@ const Strategies = () => {
           await loadBalances(dBank, tokens, account, dispatch);
         }
         
-        if (strategyRouter && account) {
-          await loadUserStrategyAllocations(strategyRouter, account, dispatch);
+        if (dBank && account) {
+          await loadUserStrategyAllocations(dBank, account, dispatch, strategyRouter);
         }
-        
+
         if (provider && chainId) {
           await loadStrategyRouter(provider, chainId, dispatch);
         }
@@ -351,29 +351,29 @@ const Strategies = () => {
     }
   }, [filteredStrategies, selectedId]);
 
-  // Load user allocations when component mounts or when account/strategyRouter changes
+  // Load user allocations when component mounts or when account/dBank changes
   useEffect(() => {
     const loadAllocations = async () => {
-      if (strategyRouter && account) {
+      if (dBank && account) {
         try {
-          await loadUserStrategyAllocations(strategyRouter, account, dispatch);
+          await loadUserStrategyAllocations(dBank, account, dispatch, strategyRouter);
         } catch (error) {
           console.error("Error loading user allocations in Strategies component:", error);
         }
       }
     };
     loadAllocations();
-    
+
     // Also reload allocations periodically to catch blockchain time advances
     // This ensures yield is reflected when time advances
     const interval = setInterval(() => {
-      if (strategyRouter && account) {
+      if (dBank && account) {
         loadAllocations();
       }
     }, 5000); // Reload every 5 seconds
-    
+
     return () => clearInterval(interval);
-  }, [strategyRouter, account, dispatch]);
+  }, [dBank, strategyRouter, account, dispatch]);
 
   return (
        <div>
