@@ -1064,45 +1064,41 @@ export const allocateToStrategy = async (provider, strategyRouter, tokens, accou
         let userBalance = await tokens[0].balanceOf(account);
         console.log('allocateToStrategy - User token balance:', ethers.utils.formatUnits(userBalance, 18));
         
-        // If user doesn't have enough tokens but has shares in dBank, withdraw tokens first
-        if (userBalance.lt(amountInWei) && dBank) {
+        // ALWAYS withdraw from vault first — allocations reduce the user's vault position.
+        // This ensures totalValue = vaultShares*PPS + allocatedValue stays correct
+        // (no double-counting) and maxWithdraw naturally caps to unallocated funds.
+        if (dBank) {
             try {
-                // Check user shares in dBank
                 const userShares = await dBank.balanceOf(account);
                 console.log('allocateToStrategy - User shares in dBank:', ethers.utils.formatUnits(userShares, 18));
-                
+
                 if (userShares.gt(0)) {
-                    // Calculate how much we need to withdraw
-                    const neededTokens = amountInWei.sub(userBalance);
+                    // Check how much we can withdraw (capped by buffer, perTxCap, user assets)
+                    const maxWithdrawBN = await dBank.maxWithdraw(account);
+                    console.log('allocateToStrategy - Max withdrawable from vault:', ethers.utils.formatUnits(maxWithdrawBN, 18));
 
-                    // Convert needed tokens to shares (to check if user has enough)
-                    const neededShares = await dBank.convertToShares(neededTokens);
-
-                    console.log('allocateToStrategy - Needed tokens:', ethers.utils.formatUnits(neededTokens, 18));
-                    console.log('allocateToStrategy - Needed shares:', ethers.utils.formatUnits(neededShares, 18));
-                    console.log('allocateToStrategy - User total shares:', ethers.utils.formatUnits(userShares, 18));
-
-                    if (userShares.gte(neededShares)) {
-                        // Withdraw tokens from dBank to cover the shortfall
-                        console.log('allocateToStrategy - Withdrawing tokens from dBank to cover allocation...');
-                        const dBankWithSigner = dBank.connect(signer);
-                        const withdrawTx = await dBankWithSigner.withdraw(neededTokens, account, account);
-                        console.log('allocateToStrategy - Withdraw tx hash:', withdrawTx.hash);
-                        await withdrawTx.wait();
-                        console.log('allocateToStrategy - Withdraw confirmed');
-                        
-                        // Refresh balance after withdrawal
-                        userBalance = await tokens[0].balanceOf(account);
-                        console.log('allocateToStrategy - User token balance after withdraw:', ethers.utils.formatUnits(userBalance, 18));
-                    } else {
-                        const errorMsg = `Insufficient shares. You have ${ethers.utils.formatUnits(userShares, 18)} shares but need ${ethers.utils.formatUnits(neededShares, 18)} to allocate ${amount} tokens.`;
-                        console.error('allocateToStrategy - Insufficient shares:', errorMsg);
+                    if (amountInWei.gt(maxWithdrawBN)) {
+                        const errorMsg = `Cannot allocate ${amount}. Max available from vault: ${ethers.utils.formatUnits(maxWithdrawBN, 18)} (limited by vault buffer).`;
+                        console.error('allocateToStrategy -', errorMsg);
                         return { ok: false, hash: null, error: errorMsg };
                     }
+
+                    // Withdraw full allocation amount from vault (burns shares)
+                    console.log('allocateToStrategy - Withdrawing from vault:', ethers.utils.formatUnits(amountInWei, 18));
+                    const dBankWithSigner = dBank.connect(signer);
+                    const withdrawTx = await dBankWithSigner.withdraw(amountInWei, account, account);
+                    console.log('allocateToStrategy - Vault withdraw tx:', withdrawTx.hash);
+                    await withdrawTx.wait();
+                    console.log('allocateToStrategy - Vault withdraw confirmed');
+
+                    userBalance = await tokens[0].balanceOf(account);
+                    console.log('allocateToStrategy - Balance after vault withdraw:', ethers.utils.formatUnits(userBalance, 18));
+                } else {
+                    return { ok: false, hash: null, error: 'No vault shares to allocate from. Please deposit to the vault first.' };
                 }
             } catch (withdrawError) {
-                console.error('allocateToStrategy - Error withdrawing from dBank:', withdrawError);
-                // Continue with original error if withdraw fails
+                console.error('allocateToStrategy - Vault withdrawal failed:', withdrawError);
+                return { ok: false, hash: null, error: `Vault withdrawal failed: ${withdrawError.message}` };
             }
         }
         

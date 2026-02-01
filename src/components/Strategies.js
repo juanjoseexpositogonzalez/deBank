@@ -51,7 +51,8 @@ const Strategies = () => {
   const userShares = useSelector(state => state.dBank.shares) || "0";
   const [userSharesOnChain, setUserSharesOnChain] = useState(null);
   const [allocationSharesByStrategy, setAllocationSharesByStrategy] = useState([]);
-  const [vaultPricePerShare, setVaultPricePerShare] = useState("1"); // PPS del vault para mostrar cuando user no tiene shares
+  const [vaultPricePerShare, setVaultPricePerShare] = useState("1");
+  const [maxWithdrawable, setMaxWithdrawable] = useState("0");
   const userSharesStr = useMemo(() => {
     if (!userShares) return '0';
     if (Array.isArray(userShares)) return '0';
@@ -121,28 +122,20 @@ const Strategies = () => {
   }, [userTotalAllocatedValue, vaultValue]);
 
   const effectivePps = useMemo(() => {
-    const totalShares = parseFloat(displaySharesStr || "0");
-    // Si el usuario tiene shares, calcular PPS efectivo basado en su valor total
-    // Si no tiene shares, usar el PPS del vault para mostrar el valor correcto
-    if (totalShares > 0) {
-      return totalValue / totalShares;
-    }
-    // Usar PPS del vault cuando el usuario no tiene shares
     return parseFloat(vaultPricePerShare) || 1;
-  }, [displaySharesStr, totalValue, vaultPricePerShare]);
+  }, [vaultPricePerShare]);
 
   const maxAlloc = useMemo(() => {
-    // For allocate: min(vault value, remaining cap)
+    // For allocate: min(maxWithdraw from vault, remaining strategy cap)
     try {
-      const vaultValueStr = vaultValue.toFixed(18);
-      const vaultValueWei = ethers.utils.parseUnits(vaultValueStr, 18);
+      const maxWithdrawWei = ethers.utils.parseUnits(maxWithdrawable || '0', 18);
       const remainingWei = ethers.utils.parseUnits(remainingForSelected || '0', 18);
-      const minWei = vaultValueWei.lt(remainingWei) ? vaultValueWei : remainingWei;
+      const minWei = maxWithdrawWei.lt(remainingWei) ? maxWithdrawWei : remainingWei;
       return ethers.utils.formatUnits(minWei, 18);
     } catch {
       return '0';
     }
-  }, [vaultValue, remainingForSelected]);
+  }, [maxWithdrawable, remainingForSelected]);
 
   const maxUnallocate = useMemo(() => {
     // Max un-allocate = current value allocated to selected strategy
@@ -220,6 +213,25 @@ const Strategies = () => {
     return () => { cancelled = true; };
   }, [dBank, account, userStrategyAllocations, userStrategyAllocationsValue, userTotalAllocated, userTotalAllocatedValue]);
 
+  // Load maxWithdraw from contract — this caps how much can be allocated
+  useEffect(() => {
+    let cancelled = false;
+    const loadMaxWithdraw = async () => {
+      if (!dBank || !account) {
+        if (!cancelled) setMaxWithdrawable("0");
+        return;
+      }
+      try {
+        const maxBN = await dBank.maxWithdraw(account);
+        if (!cancelled) setMaxWithdrawable(ethers.utils.formatUnits(maxBN, 18));
+      } catch {
+        if (!cancelled) setMaxWithdrawable("0");
+      }
+    };
+    loadMaxWithdraw();
+    return () => { cancelled = true; };
+  }, [dBank, account, displaySharesStr, userTotalAllocated]);
+
   const handleMax = () => {
     if (!selectedId) return;
     if (mode === 'allocate') {
@@ -246,10 +258,10 @@ const Strategies = () => {
       }
     }
 
-    // Pre-checks against max allowed
+    // Pre-checks against max allowed (capped by vault maxWithdraw and strategy remaining cap)
     const maxAllowedFloat = parseFloat(maxAlloc || '0');
     if (mode === 'allocate' && parseFloat(amount) > maxAllowedFloat) {
-      alert(`Cannot allocate more than ${formatWithMaxDecimals(maxAllowedFloat.toString(), 4)} tokens. Your vault position is worth ${formatWithMaxDecimals(vaultValue.toString(), 4)} tokens.`);
+      alert(`Cannot allocate more than ${formatWithMaxDecimals(maxAllowedFloat.toString(), 4)} tokens. Available from vault: ${formatWithMaxDecimals(maxWithdrawable, 4)} tokens.`);
       return;
     }
 
@@ -313,6 +325,14 @@ const Strategies = () => {
         if (dBank) {
           await loadDepositors(dBank, dispatch);
         }
+
+        // Refresh maxWithdrawable after allocation changes vault state
+        if (dBank && account) {
+          try {
+            const maxBN = await dBank.maxWithdraw(account);
+            setMaxWithdrawable(ethers.utils.formatUnits(maxBN, 18));
+          } catch { /* ignore */ }
+        }
       }
     } catch (error) {
       console.error("Error in handleSubmit:", error);
@@ -373,7 +393,7 @@ const Strategies = () => {
 
           <Row className='my-2 text-end'>
             <Form.Text style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
-              Total shares: {userSharesFormatted} | PPS (effective): {formatWithMaxDecimals(effectivePps, 2)} | Total value: {formatWithMaxDecimals(totalValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Allocated value: {formatWithMaxDecimals(userTotalAllocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Vault value: {formatWithMaxDecimals(vaultValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Remaining cap (selected): {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
+              Total shares: {userSharesFormatted} | PPS: {formatWithMaxDecimals(effectivePps, 2)} | Total value: {formatWithMaxDecimals(totalValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Allocated: {formatWithMaxDecimals(userTotalAllocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Vault: {formatWithMaxDecimals(vaultValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Available to allocate: {formatWithMaxDecimals(maxWithdrawable, 2)} | Remaining cap: {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
             </Form.Text>
           </Row>
 
