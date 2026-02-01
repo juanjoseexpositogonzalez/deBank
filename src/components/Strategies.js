@@ -102,9 +102,10 @@ const Strategies = () => {
     return totalShares * pps;
   }, [displaySharesStr, vaultPricePerShare]);
 
-  const totalValue = useMemo(() => {
-    return parseFloat(userTotalAllocatedValue || "0") + vaultValue;
-  }, [userTotalAllocatedValue, vaultValue]);
+  // Total value = shares * PPS (already includes allocated + unallocated)
+  // PPS = totalAssets / totalSupply, where totalAssets = buffer + strategy assets
+  // So shares * PPS = user's total value (allocated + unallocated)
+  const totalValue = useMemo(() => vaultValue, [vaultValue]);
 
   const effectivePps = useMemo(() => {
     return parseFloat(vaultPricePerShare) || 1;
@@ -382,7 +383,7 @@ const Strategies = () => {
 
           <Row className='my-2 text-end'>
             <Form.Text style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
-              Total shares: {userSharesFormatted} | PPS: {formatWithMaxDecimals(effectivePps, 2)} | Total value: {formatWithMaxDecimals(totalValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Allocated: {formatWithMaxDecimals(userTotalAllocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Vault: {formatWithMaxDecimals(vaultValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Available to allocate: {formatWithMaxDecimals(maxWithdrawable, 2)} | Remaining cap: {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
+              Total shares: {userSharesFormatted} | PPS: {formatWithMaxDecimals(effectivePps, 2)} | Total value: {formatWithMaxDecimals(totalValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Allocated: {formatWithMaxDecimals(userTotalAllocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Unallocated: {formatWithMaxDecimals((totalValue - parseFloat(userTotalAllocatedValue || "0")).toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Available to allocate: {formatWithMaxDecimals(maxWithdrawable, 2)} | Remaining cap: {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
             </Form.Text>
           </Row>
 
