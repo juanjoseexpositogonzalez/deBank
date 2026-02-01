@@ -159,10 +159,6 @@ async function main() {
 
     // Amounts to fund test accounts (reduced on Sepolia)
     const USER_BALANCE = tokens(isSepolia ? 500 : 100000);
-    const DEPOSIT_AMOUNT_DEPLOYER = tokens(isSepolia ? 200 : 5000);
-    const DEPOSIT_AMOUNT_USER1 = tokens(isSepolia ? 100 : 5000);
-    const DEPOSIT_AMOUNT_USER2 = tokens(isSepolia ? 50 : 3000);
-    const DEPOSIT_AMOUNT_USER3 = tokens(isSepolia ? 30 : 2000);
 
     // Number of test users to create (maximum 3)
     const NUM_SEED_USERS = Math.min(3, users.length);
@@ -569,89 +565,6 @@ async function main() {
     // Check if vault has approved router (if needed for future operations)
     const vaultRouterAllowance = await token.allowance(DBANK_ADDRESS, STRATEGY_ROUTER_ADDRESS);
     console.log(`  Vault's allowance to router: ${ethers.utils.formatEther(vaultRouterAllowance)} tokens\n`);
-
-    console.log("==========================================");
-    console.log("STEP 4: Initial Deposits");
-    console.log("==========================================\n");
-
-    // --- Deployer deposit (so the MetaMask default account has a vault position) ---
-    {
-        const deployerBal = await token.balanceOf(deployer.address);
-        if (deployerBal.gte(DEPOSIT_AMOUNT_DEPLOYER)) {
-            console.log(`  Performing deposit from deployer (${deployer.address})...`);
-            console.log(`    Amount: ${ethers.utils.formatEther(DEPOSIT_AMOUNT_DEPLOYER)} tokens`);
-
-            // Approve dBank to spend deployer tokens
-            const allowance = await token.allowance(deployer.address, DBANK_ADDRESS);
-            if (allowance.lt(DEPOSIT_AMOUNT_DEPLOYER)) {
-                const approveTx = await token.approve(DBANK_ADDRESS, DEPOSIT_AMOUNT_DEPLOYER, await getTxOptions());
-                await approveTx.wait();
-                console.log(`    ✓ Allowance approved`);
-            }
-
-            try {
-                const previewShares = await dbank.previewDeposit(DEPOSIT_AMOUNT_DEPLOYER);
-                console.log(`    Expected shares: ${ethers.utils.formatEther(previewShares)}`);
-
-                const tx = await dbank.deposit(DEPOSIT_AMOUNT_DEPLOYER, deployer.address, await getTxOptions());
-                const receipt = await tx.wait();
-
-                const depositEvent = receipt.events.find(e => e.event === 'Deposit');
-                if (depositEvent) {
-                    const { assets, shares } = depositEvent.args;
-                    console.log(`    ✓ Deployer deposit successful:`);
-                    console.log(`      Assets: ${ethers.utils.formatEther(assets)} tokens`);
-                    console.log(`      Shares: ${ethers.utils.formatEther(shares)}\n`);
-                } else {
-                    console.log(`    ✓ Deployer deposit completed\n`);
-                }
-            } catch (error) {
-                console.error(`    ✗ Deployer deposit error: ${error.message}\n`);
-            }
-        } else {
-            console.log(`  ⚠ Deployer does not have sufficient funds to deposit ${ethers.utils.formatEther(DEPOSIT_AMOUNT_DEPLOYER)} tokens\n`);
-        }
-    }
-
-    // Perform deposits from test accounts
-    const depositAmounts = [DEPOSIT_AMOUNT_USER1, DEPOSIT_AMOUNT_USER2, DEPOSIT_AMOUNT_USER3];
-
-    for (let i = 0; i < NUM_SEED_USERS; i++) {
-        const user = users[i];
-        const depositAmount = depositAmounts[i] || depositAmounts[0];
-        const userBalance = await token.balanceOf(user.address);
-
-        if (userBalance.lt(depositAmount)) {
-            console.log(`  ⚠ User ${i + 1} does not have sufficient funds to deposit ${ethers.utils.formatEther(depositAmount)} tokens`);
-            console.log(`    Available balance: ${ethers.utils.formatEther(userBalance)} tokens\n`);
-            continue;
-        }
-
-        console.log(`  Performing deposit from user ${i + 1} (${user.address})...`);
-        console.log(`    Amount: ${ethers.utils.formatEther(depositAmount)} tokens`);
-
-        try {
-            const dbankUser = dbank.connect(user);
-            const previewShares = await dbankUser.previewDeposit(depositAmount);
-            console.log(`    Expected shares: ${ethers.utils.formatEther(previewShares)}`);
-
-            const tx = await dbankUser.deposit(depositAmount, user.address);
-            const receipt = await tx.wait();
-
-            // Extract information from Deposit event
-            const depositEvent = receipt.events.find(e => e.event === 'Deposit');
-            if (depositEvent) {
-                const { assets, shares } = depositEvent.args;
-                console.log(`    ✓ Deposit successful:`);
-                console.log(`      Assets: ${ethers.utils.formatEther(assets)} tokens`);
-                console.log(`      Shares: ${ethers.utils.formatEther(shares)}\n`);
-            } else {
-                console.log(`    ✓ Deposit completed\n`);
-            }
-        } catch (error) {
-            console.error(`    ✗ Deposit error: ${error.message}\n`);
-        }
-    }
 
     console.log("==========================================");
     console.log("STEP 5: Final State and Validations");

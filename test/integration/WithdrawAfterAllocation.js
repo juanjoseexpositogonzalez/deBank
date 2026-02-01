@@ -144,105 +144,89 @@ describe('Integration: Withdraw After Allocation Bug', () => {
             console.log('User token balance after withdraw:', ethers.utils.formatUnits(userTokenBalance, 18));
         });
         
-        it('should show the bug: contract rejects valid withdrawal', async () => {
+        it('maxWithdraw returns full share value regardless of allocations', async () => {
             // Same setup as above
             await token.connect(user).approve(dBank.address, DEPOSIT_AMOUNT);
             await dBank.connect(user).deposit(DEPOSIT_AMOUNT, user.address);
-            
+
             await token.connect(user).approve(strategyRouter.address, ALLOCATION_AMOUNT);
             await strategyRouter.connect(user).depositToStrategy(1, ALLOCATION_AMOUNT);
-            
+
             // Advance 1 year
             await ethers.provider.send('evm_increaseTime', [ONE_YEAR_IN_SECONDS]);
             await ethers.provider.send('evm_mine');
-            
-            // Log the state
+
             const userShares = await dBank.balanceOf(user.address);
             const userAllocated = await strategyRouter.getUserTotalAllocated(user.address);
-            const totalAssets = await dBank.totalAssets();
-            const totalSupply = await dBank.totalSupply();
-            
-            console.log('\n--- State after 1 year ---');
-            console.log('User shares in dBank:', ethers.utils.formatUnits(userShares, 18));
-            console.log('User allocated to strategies:', ethers.utils.formatUnits(userAllocated, 18));
-            console.log('dBank total assets:', ethers.utils.formatUnits(totalAssets, 18));
-            console.log('dBank total supply:', ethers.utils.formatUnits(totalSupply, 18));
-            
-            // Calculate what contract thinks
-            const allocatedShares = await dBank.convertToShares(userAllocated);
-            const unallocatedShares = userShares.gt(allocatedShares) 
-                ? userShares.sub(allocatedShares) 
-                : ethers.BigNumber.from(0);
-            
-            console.log('\n--- Contract calculation ---');
-            console.log('allocatedShares = convertToShares(4000):', ethers.utils.formatUnits(allocatedShares, 18));
-            console.log('unallocatedShares = 5000 - allocatedShares:', ethers.utils.formatUnits(unallocatedShares, 18));
-            
-            // Max the user can withdraw according to contract
-            const maxWithdrawable = await dBank.convertToAssets(unallocatedShares);
-            console.log('Max withdrawable (contract):', ethers.utils.formatUnits(maxWithdrawable, 18));
-            
-            // What user SHOULD be able to withdraw (full deposit since allocation is separate)
-            console.log('What user should be able to withdraw: 5000 USDC (full deposit)');
-            
-            // Try to withdraw 1000 USDC (the "unallocated" amount in frontend model)
-            const withdrawAmount = tokens(1000);
-            const sharesToBurn = await dBank.convertToShares(withdrawAmount);
-            
-            console.log('\n--- Withdrawal attempt ---');
-            console.log('Withdraw amount:', ethers.utils.formatUnits(withdrawAmount, 18), 'USDC');
-            console.log('Shares to burn:', ethers.utils.formatUnits(sharesToBurn, 18));
-            console.log('Unallocated shares:', ethers.utils.formatUnits(unallocatedShares, 18));
-            console.log('Will revert?', sharesToBurn.gt(unallocatedShares) ? 'YES (BUG!)' : 'NO');
-            
-            if (sharesToBurn.gt(unallocatedShares)) {
-                // This demonstrates the bug
-                await expect(
-                    dBank.connect(user).withdraw(withdrawAmount, user.address, user.address)
-                ).to.be.revertedWithCustomError(dBank, 'dBank__SharesAllocated');
-                
-                console.log('\n*** BUG CONFIRMED: Valid withdrawal was rejected ***');
-            } else {
-                // If it doesn't revert, the calculation shows no bug in this scenario
-                await dBank.connect(user).withdraw(withdrawAmount, user.address, user.address);
-                console.log('\nWithdrawal succeeded');
-            }
+            expect(userShares).to.equal(DEPOSIT_AMOUNT);
+            expect(userAllocated).to.equal(ALLOCATION_AMOUNT);
+
+            // maxWithdraw returns full share value (allocations don't reduce it)
+            const maxW = await dBank.maxWithdraw(user.address);
+            expect(maxW).to.equal(DEPOSIT_AMOUNT);
+
+            // Withdrawing 2000 succeeds (within buffer)
+            await expect(
+                dBank.connect(user).withdraw(tokens(2000), user.address, user.address)
+            ).to.not.be.reverted;
+
+            // Withdrawing remainder also succeeds
+            const remaining = DEPOSIT_AMOUNT.sub(tokens(2000));
+            await expect(
+                dBank.connect(user).withdraw(remaining, user.address, user.address)
+            ).to.not.be.reverted;
         });
     });
     
-    describe('Expected behavior after fix', () => {
-        it('user should be able to withdraw full deposit regardless of strategy allocations', async () => {
+    describe('Expected behavior: allocations do not block vault withdrawals', () => {
+        it('user can withdraw full deposit even with strategy allocations', async () => {
             // User deposits 5000 to dBank
             await token.connect(user).approve(dBank.address, DEPOSIT_AMOUNT);
             await dBank.connect(user).deposit(DEPOSIT_AMOUNT, user.address);
-            
-            // User allocates 4000 from wallet to strategy (NOT from dBank)
+
+            // User allocates 4000 from wallet to strategy
             await token.connect(user).approve(strategyRouter.address, ALLOCATION_AMOUNT);
             await strategyRouter.connect(user).depositToStrategy(1, ALLOCATION_AMOUNT);
-            
+
             // Advance 1 year
             await ethers.provider.send('evm_increaseTime', [ONE_YEAR_IN_SECONDS]);
             await ethers.provider.send('evm_mine');
-            
-            // User should be able to withdraw their original deposit (5000 USDC)
-            // The shares are worth more now due to yield, but we withdraw the original amount
-            const userShares = await dBank.balanceOf(user.address);
-            
-            console.log('User shares:', ethers.utils.formatUnits(userShares, 18));
-            console.log('Original deposit:', ethers.utils.formatUnits(DEPOSIT_AMOUNT, 18));
-            
-            // Withdraw the original deposit amount
-            // After the fix, this should NOT revert with SharesAllocated
+
+            // Strategy allocations are independent of vault shares
+            // User can withdraw full deposit
             await expect(
                 dBank.connect(user).withdraw(DEPOSIT_AMOUNT, user.address, user.address)
             ).to.not.be.reverted;
-            
-            console.log('SUCCESS: User withdrew full original deposit');
-            
-            // Verify the withdrawal
-            const userTokenBalance = await token.balanceOf(user.address);
-            console.log('User token balance after withdraw:', ethers.utils.formatUnits(userTokenBalance, 18));
-            expect(userTokenBalance).to.be.gte(DEPOSIT_AMOUNT);
+        });
+
+        it('user can withdraw full deposit after un-allocating from strategy', async () => {
+            // User deposits 5000 to dBank
+            await token.connect(user).approve(dBank.address, DEPOSIT_AMOUNT);
+            await dBank.connect(user).deposit(DEPOSIT_AMOUNT, user.address);
+
+            // User allocates 4000 from wallet to strategy
+            await token.connect(user).approve(strategyRouter.address, ALLOCATION_AMOUNT);
+            await strategyRouter.connect(user).depositToStrategy(1, ALLOCATION_AMOUNT);
+
+            // Advance 1 year
+            await ethers.provider.send('evm_increaseTime', [ONE_YEAR_IN_SECONDS]);
+            await ethers.provider.send('evm_mine');
+
+            // Un-allocate: provide router liquidity for yield, then withdraw
+            const strategyTotalAssets = await mockS1.totalAssets();
+            const principal = await mockS1.principal();
+            const yieldAmount = strategyTotalAssets.sub(principal);
+            if (yieldAmount.gt(0)) {
+                await token.transfer(strategyRouter.address, yieldAmount);
+            }
+            await strategyRouter.connect(user).withdrawFromStrategy(1, strategyTotalAssets, 100);
+
+            // After un-allocating, user has 0 allocations -> can withdraw full deposit
+            expect(await strategyRouter.getUserTotalAllocated(user.address)).to.equal(0);
+
+            await expect(
+                dBank.connect(user).withdraw(DEPOSIT_AMOUNT, user.address, user.address)
+            ).to.not.be.reverted;
         });
     });
 });

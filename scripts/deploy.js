@@ -7,6 +7,8 @@
 require("dotenv").config();
 const hre = require("hardhat");
 const { ethers } = require("hardhat");
+const fs = require("fs");
+const path = require("path");
 
 async function main() {
   const [deployer] = await ethers.getSigners();
@@ -103,6 +105,38 @@ async function main() {
   console.log(`MockS1 (Strategy S1):          ${mockS1.address}`);
   console.log(`dBank (Vault):                 ${dbank.address}`);
   console.log("==========================================\n");
+
+  // ============================================================
+  // Update config.json
+  // ============================================================
+  console.log("Updating src/config.json...");
+  const configPath = path.join(__dirname, '../src/config.json');
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+  const { chainId } = await ethers.provider.getNetwork();
+  const chainKey = String(chainId);
+
+  config[chainKey] = {
+    ...config[chainKey],
+    token: {
+      address: token.address
+    },
+    dbank: {
+      address: dbank.address
+    },
+    strategyRouter: {
+      address: strategyRouter.address
+    },
+    configManager: {
+      address: configManager.address
+    },
+    mockS1: {
+      address: mockS1.address
+    }
+  };
+
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  console.log("✓ config.json updated\n");
 
   // ============================================================
   // Optional verification (if ETHERSCAN_API_KEY is configured)

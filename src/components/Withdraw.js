@@ -14,14 +14,15 @@ import {
 import { formatWithMaxDecimals, getExplorerUrl, truncateAddress } from '../utils/format';
 
 import { useSelector, useDispatch } from 'react-redux';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 const Withdraw = () => {
     const [usdcAmount, setUsdcAmount] = useState("");
-    const [sharesAmount, setSharesAmount] = useState("");   
+    const [sharesAmount, setSharesAmount] = useState("");
     const [showAlert, setShowAlert] = useState(false);
     const [showConfirmModal, setShowConfirmModal] = useState(false);
-    
+    const [maxWithdrawable, setMaxWithdrawable] = useState("0");
+
     // Ref for debouncing conversion calls
     const conversionTimeoutRef = useRef(null);
 
@@ -39,7 +40,6 @@ const Withdraw = () => {
     const shares = useSelector(state => state.dBank.shares);
     const balances = useSelector(state => state.tokens.balances);
     const dBank = useSelector(state => state.dBank.contract);
-    const strategyRouter = useSelector(state => state.strategyRouter.contract);
     const depositorsList = useSelector(state => state.dBank.depositors.list);
     const depositorsLoading = useSelector(state => state.dBank.depositors.isLoading);
 
@@ -47,39 +47,52 @@ const Withdraw = () => {
 
     const explorerBaseUrl = getExplorerUrl(chainId);
 
-    // Available shares = user's full vault balance
-    // Strategy allocations are independent (tokens go from wallet, not vault)
-    const availableShares = shares || "0";
+    // Load maxWithdraw from contract (capped to buffer, perTxCap, and user assets)
+    const refreshMaxWithdraw = useCallback(async () => {
+        if (!dBank || !account) {
+            setMaxWithdrawable("0");
+            return;
+        }
+        try {
+            const maxBN = await dBank.maxWithdraw(account);
+            setMaxWithdrawable(ethers.utils.formatUnits(maxBN, 18));
+        } catch (error) {
+            console.error("Error loading maxWithdraw:", error);
+            setMaxWithdrawable("0");
+        }
+    }, [dBank, account]);
 
-    // Refresh balances and depositors when component mounts
+    // Refresh balances, depositors, and maxWithdraw when component mounts
     useEffect(() => {
         const refreshData = async () => {
             if (dBank && tokens && account) {
                 try {
                     await loadBalances(dBank, tokens, account, dispatch);
                     await loadDepositors(dBank, dispatch);
+                    await refreshMaxWithdraw();
                 } catch (error) {
                     console.error("Error refreshing data in Withdraw:", error);
                 }
             }
         };
         refreshData();
-    }, [account, dBank, tokens, dispatch]);
+    }, [account, dBank, tokens, dispatch, refreshMaxWithdraw]);
 
-    // Refresh after successful withdraw
+    // Refresh after successful withdraw (balances + maxWithdraw cap)
     useEffect(() => {
         if (isWithdrawSuccess && dBank && tokens && account) {
             const refreshAfterWithdraw = async () => {
                 try {
                     await loadBalances(dBank, tokens, account, dispatch);
                     await loadDepositors(dBank, dispatch);
+                    await refreshMaxWithdraw();
                 } catch (error) {
                     console.error("Error refreshing balances after withdraw:", error);
                 }
             };
             refreshAfterWithdraw();
         }
-    }, [isWithdrawSuccess, dBank, tokens, account, dispatch]);
+    }, [isWithdrawSuccess, dBank, tokens, account, dispatch, refreshMaxWithdraw]);
 
     // Periodic refresh of depositors (every 30s)
     useEffect(() => {
@@ -106,22 +119,19 @@ const Withdraw = () => {
         }
 
         try {
-            // Get current user shares from contract
-            const currentSharesBN = await dBank.balanceOf(account);
-            const currentShares = parseFloat(ethers.utils.formatUnits(currentSharesBN, 18));
-            
-            if (currentShares <= 0) {
-                alert("You don't have any shares to withdraw.");
+            // Validate against contract's maxWithdraw (accounts for buffer, perTxCap, user assets)
+            const assetsToWithdrawBN = ethers.utils.parseUnits(usdcAmount, 18);
+            const maxWithdrawBN = await dBank.maxWithdraw(account);
+
+            if (assetsToWithdrawBN.gt(maxWithdrawBN)) {
+                const maxFormatted = parseFloat(ethers.utils.formatUnits(maxWithdrawBN, 18)).toFixed(4);
+                alert(`Cannot withdraw ${usdcAmount}. Maximum available: ${maxFormatted} (limited by vault buffer).`);
                 return;
             }
 
-            // Basic validation: don't exceed total balance
-            // The contract will validate allocations - if rejected, we show a friendly error
-            const assetsToWithdrawBN = ethers.utils.parseUnits(usdcAmount, 18);
-            const sharesToWithdrawBN = await dBank.convertToShares(assetsToWithdrawBN);
-
-            if (sharesToWithdrawBN.gt(currentSharesBN)) {
-                alert(`Cannot withdraw. You only have ${currentShares.toFixed(4)} shares.`);
+            const currentSharesBN = await dBank.balanceOf(account);
+            if (currentSharesBN.lte(0)) {
+                alert("You don't have any shares to withdraw.");
                 return;
             }
         } catch (error) {
@@ -139,17 +149,14 @@ const Withdraw = () => {
         setShowConfirmModal(false);
         setShowAlert(false);
 
-        const result = await withdrawFunds(provider, dBank, tokens, account, usdcAmount, dispatch);
+        await withdrawFunds(provider, dBank, tokens, account, usdcAmount, dispatch);
 
         setShowAlert(true);
 
-        if (result) {
-            setUsdcAmount("");
-            setSharesAmount("");
-        } else {
-            setUsdcAmount("");
-            setSharesAmount("");
-        }
+        // Always clear inputs and refresh max withdrawal cap
+        setUsdcAmount("");
+        setSharesAmount("");
+        await refreshMaxWithdraw();
     };
 
     const amountHandler = async (e) => {
@@ -195,77 +202,39 @@ const Withdraw = () => {
         }, 300);
     }
 
-    // Max on asset input - sets to unallocated vault balance (total shares minus strategy allocations)
+    // Max on asset input - uses contract's maxWithdraw (capped to buffer)
     const maxHandlerBalance = async () => {
         if (!dBank || !account) return;
 
         try {
-            const currentSharesBN = await dBank.balanceOf(account);
-            if (currentSharesBN.lte(0)) {
-                alert("You don't have any shares to withdraw.");
+            const maxBN = await dBank.maxWithdraw(account);
+            if (maxBN.lte(0)) {
+                alert("No funds available to withdraw. The vault buffer may be empty.");
                 return;
             }
 
-            // Subtract allocated shares
-            let unallocatedSharesBN = currentSharesBN;
-            if (strategyRouter) {
-                try {
-                    const allocatedBN = await strategyRouter.getUserTotalAllocated(account);
-                    const allocatedSharesBN = await dBank.convertToShares(allocatedBN);
-                    unallocatedSharesBN = currentSharesBN.gt(allocatedSharesBN)
-                        ? currentSharesBN.sub(allocatedSharesBN)
-                        : ethers.BigNumber.from(0);
-                } catch (err) {
-                    console.warn("Could not fetch allocated shares:", err.message);
-                }
-            }
-
-            if (unallocatedSharesBN.lte(0)) {
-                alert("All your shares are allocated to strategies. Un-allocate first.");
-                return;
-            }
-
-            const assetsBN = await dBank.convertToAssets(unallocatedSharesBN);
-            setUsdcAmount(ethers.utils.formatUnits(assetsBN, 18));
-            setSharesAmount(ethers.utils.formatUnits(unallocatedSharesBN, 18));
+            const sharesBN = await dBank.convertToShares(maxBN);
+            setUsdcAmount(ethers.utils.formatUnits(maxBN, 18));
+            setSharesAmount(ethers.utils.formatUnits(sharesBN, 18));
         } catch (error) {
             console.error("Max conversion error:", error);
         }
     }
 
-    // Max on shares input - sets to unallocated vault balance
+    // Max on shares input - uses contract's maxRedeem (capped to buffer)
     const maxHandlerShares = async () => {
         if (!dBank || !account) return;
 
         try {
-            const currentSharesBN = await dBank.balanceOf(account);
-            if (currentSharesBN.lte(0)) {
-                alert("You don't have any shares to withdraw.");
+            const maxSharesBN = await dBank.maxRedeem(account);
+            if (maxSharesBN.lte(0)) {
+                alert("No shares available to redeem. The vault buffer may be empty.");
                 return;
             }
 
-            // Subtract allocated shares
-            let unallocatedSharesBN = currentSharesBN;
-            if (strategyRouter) {
-                try {
-                    const allocatedBN = await strategyRouter.getUserTotalAllocated(account);
-                    const allocatedSharesBN = await dBank.convertToShares(allocatedBN);
-                    unallocatedSharesBN = currentSharesBN.gt(allocatedSharesBN)
-                        ? currentSharesBN.sub(allocatedSharesBN)
-                        : ethers.BigNumber.from(0);
-                } catch (err) {
-                    console.warn("Could not fetch allocated shares:", err.message);
-                }
-            }
-
-            if (unallocatedSharesBN.lte(0)) {
-                alert("All your shares are allocated to strategies. Un-allocate first.");
-                return;
-            }
-
-            const assetsBN = await dBank.convertToAssets(unallocatedSharesBN);
+            const assetsBN = await dBank.convertToAssets(maxSharesBN);
             setUsdcAmount(ethers.utils.formatUnits(assetsBN, 18));
-            setSharesAmount(ethers.utils.formatUnits(unallocatedSharesBN, 18));
+            setSharesAmount(ethers.utils.formatUnits(maxSharesBN, 18));
         } catch (error) {
             console.error("Max shares conversion error:", error);
         }
@@ -276,10 +245,17 @@ const Withdraw = () => {
             <Card style={{ maxWidth: '450px'}} className='mx-auto px-4'>
             {account ? (
                 <Form onSubmit={handleWithdrawClick} style={{ maxWidht: '450px', margin: '50px auto'}}>
+                    {parseFloat(maxWithdrawable) > 0 && (
+                        <Row>
+                            <Form.Text className='text-center my-2' style={{ color: '#20c997', fontSize: '0.95rem', fontWeight: '500' }}>
+                                Available to withdraw: {formatWithMaxDecimals(maxWithdrawable)} {symbols && symbols[0]}
+                            </Form.Text>
+                        </Row>
+                    )}
                     <Row>
                         <Form.Text className='text-end my-2' style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
                             Wallet Balance: {formatWithMaxDecimals(balances && balances[0] ? balances[0] : "0")} {symbols && symbols[0]}
-                            {availableShares && parseFloat(availableShares) > 0 && (
+                            {parseFloat(maxWithdrawable) > 0 && (
                                 <span
                                     onClick={maxHandlerBalance}
                                     style={{
@@ -295,21 +271,21 @@ const Withdraw = () => {
                             )}
                         </Form.Text>
                         <InputGroup hasValidation>
-                            <Form.Control 
-                              type='number' 
-                              placeholder='0.0' 
+                            <Form.Control
+                              type='number'
+                              placeholder='0.0'
                               min='0.0'
                               step="any"
                               id="usdc"
                               onChange={(e) => amountHandler(e)}
                               value={usdcAmount === 0 ? "" : usdcAmount}
-                              isInvalid={sharesAmount && availableShares && parseFloat(sharesAmount) > parseFloat(availableShares)}
+                              isInvalid={usdcAmount && parseFloat(usdcAmount) > parseFloat(maxWithdrawable)}
                             />
                           <InputGroup.Text style={{ width: "100px" }} className="justify-content-center">
                              {symbols && symbols[0]}
                           </InputGroup.Text>
                           <Form.Control.Feedback type="invalid">
-                            Amount exceeds available shares
+                            Amount exceeds available buffer (unallocated capital)
                           </Form.Control.Feedback>
                         </InputGroup>
                     </Row>

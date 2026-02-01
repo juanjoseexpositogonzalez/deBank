@@ -169,10 +169,10 @@ describe('dBank', () => {
             expect(assets).to.be.lte(shares)
         })
 
-        it('convertToAssets returns 0 when totalSupply is 0', async () => {
-            const shares = SMALL_AMOUNT // 0.000001 tokens
+        it('convertToAssets returns 1:1 when totalSupply is 0', async () => {
+            const shares = SMALL_AMOUNT
             const assets = await dbank.convertToAssets(shares)
-            expect(assets).to.equal(0)
+            expect(assets).to.equal(shares) // 1:1 ratio when no shares exist
         })
 
         it('pricePerShare returns 1e18 when totalSupply is 0', async () => {
@@ -327,17 +327,18 @@ describe('dBank', () => {
         })
 
         it('previewMint matches actual mint assets', async () => {
-            const shares = tokens(1000)
+            // Use an amount within perTxCap (5000e6 = 5e9)
+            const shares = SMALL_AMOUNT // 1e9, within perTxCap
             const previewAssets = await dbank.previewMint(shares)
-            
+
             await token.connect(receiver).approve(dbank.address, previewAssets.mul(2)) // Approve extra for safety
             const tx = await dbank.connect(receiver).mint(shares, receiver.address)
             const receipt = await tx.wait()
-            
+
             // Extract assets from Deposit event
             const depositEvent = receipt.events.find(e => e.event === 'Deposit')
             const actualAssets = depositEvent.args.assets
-            
+
             expect(previewAssets).to.equal(actualAssets)
         })
     })
@@ -501,23 +502,41 @@ describe('dBank', () => {
             expect(balance).to.be.gte(withdrawAmount)
         })
 
-        it('withdraw succeeds even when user has allocations in strategies', async () => {
+        it('withdraw succeeds for unallocated portion when user has strategy allocations', async () => {
             // Deploy and register MockS1
             const MockS1 = await ethers.getContractFactory('MockS1')
             const mockS1 = await MockS1.deploy(token.address)
             await mockS1.setParams(500, tokens(1000000))
             await strategyRouter.registerStrategy(1, mockS1.address, tokens(100000))
 
-            // Create a user allocation directly in the router (from wallet, NOT from dBank)
+            // Allocate SMALL_AMOUNT to strategy from wallet (NOT from dBank)
+            // User has MEDIUM_AMOUNT shares, allocating SMALL_AMOUNT leaves SMALL_AMOUNT unallocated
+            await token.connect(receiver).approve(strategyRouter.address, SMALL_AMOUNT)
+            await strategyRouter.connect(receiver).depositToStrategy(1, SMALL_AMOUNT)
+
+            // Withdraw within unallocated portion succeeds
+            // Unallocated = MEDIUM_AMOUNT - SMALL_AMOUNT = SMALL_AMOUNT
+            const withdrawAmount = SMALL_AMOUNT
+            await expect(
+                dbank.connect(receiver).withdraw(withdrawAmount, receiver.address, receiver.address)
+            ).to.not.be.reverted
+        })
+
+        it('withdraw succeeds regardless of external strategy allocations', async () => {
+            // Deploy and register MockS1
+            const MockS1 = await ethers.getContractFactory('MockS1')
+            const mockS1 = await MockS1.deploy(token.address)
+            await mockS1.setParams(500, tokens(1000000))
+            await strategyRouter.registerStrategy(1, mockS1.address, tokens(100000))
+
+            // Allocate tokens(1) from wallet to strategy
             const allocationAmount = tokens(1)
             await token.connect(receiver).approve(strategyRouter.address, allocationAmount)
             await strategyRouter.connect(receiver).depositToStrategy(1, allocationAmount)
 
-            // User should still be able to withdraw from dBank
-            // because strategy allocations are a separate system
-            const withdrawAmount = SMALL_AMOUNT
+            // Strategy allocations are independent of vault - withdrawal succeeds
             await expect(
-                dbank.connect(receiver).withdraw(withdrawAmount, receiver.address, receiver.address)
+                dbank.connect(receiver).withdraw(SMALL_AMOUNT, receiver.address, receiver.address)
             ).to.not.be.reverted
         })
 
@@ -1049,48 +1068,37 @@ describe('dBank', () => {
             expect(balanceAfter.sub(balanceBefore)).to.equal(withdrawAmount)
         })
 
-        it('withdraw pulls from strategy when buffer insufficient', async () => {
+        it('withdraw reverts when amount exceeds buffer (no auto-pull from strategy)', async () => {
             const buffer = await dbank.buffer()
             const withdrawAmount = buffer.add(tokens(1000)) // More than buffer
 
+            await expect(
+                dbank.connect(receiver).withdraw(withdrawAmount, receiver.address, receiver.address)
+            ).to.be.revertedWithCustomError(dbank, 'dBank__CapExceeded')
+        })
+
+        it('withdraw succeeds up to buffer amount even when strategies hold more', async () => {
+            const buffer = await dbank.buffer()
+
             const balanceBefore = await token.balanceOf(receiver.address)
-            await dbank.connect(receiver).withdraw(withdrawAmount, receiver.address, receiver.address)
+            await dbank.connect(receiver).withdraw(buffer, receiver.address, receiver.address)
             const balanceAfter = await token.balanceOf(receiver.address)
 
-            expect(balanceAfter.sub(balanceBefore)).to.equal(withdrawAmount)
+            expect(balanceAfter.sub(balanceBefore)).to.equal(buffer)
+            expect(await dbank.buffer()).to.equal(0)
         })
 
-        it('withdraw emits WithdrawnFromStrategy when pulling from strategies', async () => {
-            const buffer = await dbank.buffer()
-            const withdrawAmount = buffer.add(tokens(1000)) // Forces strategy withdrawal
-
-            await expect(dbank.connect(receiver).withdraw(withdrawAmount, receiver.address, receiver.address))
-                .to.emit(dbank, 'WithdrawnFromStrategy')
-        })
-
-        it('redeem pulls from strategy when buffer insufficient', async () => {
-            // Get shares worth more than buffer
+        it('redeem reverts when assets exceed buffer', async () => {
             const buffer = await dbank.buffer()
             const shares = await dbank.balanceOf(receiver.address)
             const assetsForShares = await dbank.convertToAssets(shares)
 
-            // Only redeem if we have enough shares for more than buffer
+            // Only test if user has enough shares for more than buffer
             if (assetsForShares.gt(buffer)) {
-                const redeemShares = shares.div(2) // Half of shares
-                const expectedAssets = await dbank.convertToAssets(redeemShares)
-
-                if (expectedAssets.gt(buffer)) {
-                    const balanceBefore = await token.balanceOf(receiver.address)
-                    await dbank.connect(receiver).redeem(redeemShares, receiver.address, receiver.address)
-                    const balanceAfter = await token.balanceOf(receiver.address)
-
-                    // Use tolerance for comparison due to yield accrual during test execution
-                    const actualReceived = balanceAfter.sub(balanceBefore)
-                    // Allow 0.01% tolerance for timing differences
-                    const tolerance = expectedAssets.div(10000)
-                    expect(actualReceived).to.be.gte(expectedAssets.sub(tolerance))
-                    expect(actualReceived).to.be.lte(expectedAssets.add(tolerance))
-                }
+                // Redeem all shares — assets exceed buffer
+                await expect(
+                    dbank.connect(receiver).redeem(shares, receiver.address, receiver.address)
+                ).to.be.revertedWithCustomError(dbank, 'dBank__InsufficientLiquidity')
             }
         })
     })

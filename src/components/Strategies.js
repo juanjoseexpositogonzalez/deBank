@@ -4,7 +4,7 @@ import { Card, Form, Button, InputGroup, Row, Spinner, Table } from 'react-boots
 import { ethers } from 'ethers';
 
 import Alert from './Alert';
-import { allocateToStrategy, unallocateFromStrategy, loadUserStrategyAllocations, loadBalances, loadStrategyRouter } from '../store/interactions';
+import { allocateToStrategy, unallocateFromStrategy, loadUserStrategyAllocations, loadBalances, loadStrategyRouter, loadDepositors } from '../store/interactions';
 
 const formatBn = (bn) => {
   try {
@@ -51,7 +51,8 @@ const Strategies = () => {
   const userShares = useSelector(state => state.dBank.shares) || "0";
   const [userSharesOnChain, setUserSharesOnChain] = useState(null);
   const [allocationSharesByStrategy, setAllocationSharesByStrategy] = useState([]);
-  const [vaultPricePerShare, setVaultPricePerShare] = useState("1"); // PPS del vault para mostrar cuando user no tiene shares
+  const [vaultPricePerShare, setVaultPricePerShare] = useState("1");
+  const [maxWithdrawable, setMaxWithdrawable] = useState("0");
   const userSharesStr = useMemo(() => {
     if (!userShares) return '0';
     if (Array.isArray(userShares)) return '0';
@@ -110,38 +111,31 @@ const Strategies = () => {
     }
   }, [selectedId, capsMemo, allocatedMemo]);
 
-  const unallocatedPrincipal = useMemo(() => {
+  const vaultValue = useMemo(() => {
     const totalShares = parseFloat(displaySharesStr || "0");
-    const allocatedPrincipal = parseFloat(userTotalAllocated || "0");
-    return Math.max(totalShares - allocatedPrincipal, 0);
-  }, [displaySharesStr, userTotalAllocated]);
+    const pps = parseFloat(vaultPricePerShare) || 1;
+    return totalShares * pps;
+  }, [displaySharesStr, vaultPricePerShare]);
 
   const totalValue = useMemo(() => {
-    return parseFloat(userTotalAllocatedValue || "0") + unallocatedPrincipal;
-  }, [userTotalAllocatedValue, unallocatedPrincipal]);
+    return parseFloat(userTotalAllocatedValue || "0") + vaultValue;
+  }, [userTotalAllocatedValue, vaultValue]);
 
   const effectivePps = useMemo(() => {
-    const totalShares = parseFloat(displaySharesStr || "0");
-    // Si el usuario tiene shares, calcular PPS efectivo basado en su valor total
-    // Si no tiene shares, usar el PPS del vault para mostrar el valor correcto
-    if (totalShares > 0) {
-      return totalValue / totalShares;
-    }
-    // Usar PPS del vault cuando el usuario no tiene shares
     return parseFloat(vaultPricePerShare) || 1;
-  }, [displaySharesStr, totalValue, vaultPricePerShare]);
+  }, [vaultPricePerShare]);
 
   const maxAlloc = useMemo(() => {
-    // For allocate: min(unallocated principal, remaining cap)
+    // For allocate: min(maxWithdraw from vault, remaining strategy cap)
     try {
-      const unallocatedWei = ethers.utils.parseUnits(unallocatedPrincipal.toString(), 18);
+      const maxWithdrawWei = ethers.utils.parseUnits(maxWithdrawable || '0', 18);
       const remainingWei = ethers.utils.parseUnits(remainingForSelected || '0', 18);
-      const minWei = unallocatedWei.lt(remainingWei) ? unallocatedWei : remainingWei;
+      const minWei = maxWithdrawWei.lt(remainingWei) ? maxWithdrawWei : remainingWei;
       return ethers.utils.formatUnits(minWei, 18);
     } catch {
       return '0';
     }
-  }, [unallocatedPrincipal, remainingForSelected]);
+  }, [maxWithdrawable, remainingForSelected]);
 
   const maxUnallocate = useMemo(() => {
     // Max un-allocate = current value allocated to selected strategy
@@ -219,6 +213,25 @@ const Strategies = () => {
     return () => { cancelled = true; };
   }, [dBank, account, userStrategyAllocations, userStrategyAllocationsValue, userTotalAllocated, userTotalAllocatedValue]);
 
+  // Load maxWithdraw from contract — this caps how much can be allocated
+  useEffect(() => {
+    let cancelled = false;
+    const loadMaxWithdraw = async () => {
+      if (!dBank || !account) {
+        if (!cancelled) setMaxWithdrawable("0");
+        return;
+      }
+      try {
+        const maxBN = await dBank.maxWithdraw(account);
+        if (!cancelled) setMaxWithdrawable(ethers.utils.formatUnits(maxBN, 18));
+      } catch {
+        if (!cancelled) setMaxWithdrawable("0");
+      }
+    };
+    loadMaxWithdraw();
+    return () => { cancelled = true; };
+  }, [dBank, account, displaySharesStr, userTotalAllocated]);
+
   const handleMax = () => {
     if (!selectedId) return;
     if (mode === 'allocate') {
@@ -245,40 +258,11 @@ const Strategies = () => {
       }
     }
 
-    // Pre-checks against max allowed
+    // Pre-checks against max allowed (capped by vault maxWithdraw and strategy remaining cap)
     const maxAllowedFloat = parseFloat(maxAlloc || '0');
     if (mode === 'allocate' && parseFloat(amount) > maxAllowedFloat) {
-      const allocationsForCalc = allocationSharesByStrategy.length > 0
-        ? allocationSharesByStrategy
-        : (userStrategyAllocationsValue.length > 0 ? userStrategyAllocationsValue : userStrategyAllocations);
-      const totalAllocated = allocationsForCalc.reduce((sum, v) => sum + parseFloat(v || '0'), 0);
-      const unallocated = parseFloat(displaySharesStr || '0') - totalAllocated;
-      alert(`Cannot allocate more than ${maxAllowedFloat} shares. You have ${userSharesFormatted} total shares, with ${formatWithMaxDecimals(unallocated.toString(), 4)} unallocated.`);
+      alert(`Cannot allocate more than ${formatWithMaxDecimals(maxAllowedFloat.toString(), 4)} tokens. Available from vault: ${formatWithMaxDecimals(maxWithdrawable, 4)} tokens.`);
       return;
-    }
-
-    // Additional validation: Check that user has enough unallocated shares before allocating
-    if (mode === 'allocate') {
-      try {
-        const amountInWei = ethers.utils.parseUnits(amount, 18);
-        const userSharesBN = ethers.utils.parseUnits(displaySharesStr || '0', 18);
-        const allocationsForCalc = allocationSharesByStrategy.length > 0
-          ? allocationSharesByStrategy
-          : (userStrategyAllocationsValue.length > 0 ? userStrategyAllocationsValue : userStrategyAllocations);
-        const userAllocatedSumBN = allocationsForCalc.reduce((acc, v) => {
-          return acc.add(toWei(v));
-        }, ethers.BigNumber.from(0));
-        const unallocatedSharesBN = userSharesBN.gt(userAllocatedSumBN) ? userSharesBN.sub(userAllocatedSumBN) : ethers.BigNumber.from(0);
-        
-        if (amountInWei.gt(unallocatedSharesBN)) {
-          alert(`Cannot allocate ${amount} shares. You only have ${ethers.utils.formatUnits(unallocatedSharesBN, 18)} unallocated shares available.`);
-          return;
-        }
-      } catch (error) {
-        console.error("Error validating allocation:", error);
-        alert("Error validating allocation. Please try again.");
-        return;
-      }
     }
 
     setShowAlert(false);
@@ -336,6 +320,18 @@ const Strategies = () => {
         
         if (provider && chainId) {
           await loadStrategyRouter(provider, chainId, dispatch);
+        }
+
+        if (dBank) {
+          await loadDepositors(dBank, dispatch);
+        }
+
+        // Refresh maxWithdrawable after allocation changes vault state
+        if (dBank && account) {
+          try {
+            const maxBN = await dBank.maxWithdraw(account);
+            setMaxWithdrawable(ethers.utils.formatUnits(maxBN, 18));
+          } catch { /* ignore */ }
         }
       }
     } catch (error) {
@@ -397,7 +393,7 @@ const Strategies = () => {
 
           <Row className='my-2 text-end'>
             <Form.Text style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
-              Total shares: {userSharesFormatted} | PPS (effective): {formatWithMaxDecimals(effectivePps, 2)} | Total value: {formatWithMaxDecimals(totalValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Allocated value: {formatWithMaxDecimals(userTotalAllocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Unallocated value: {formatWithMaxDecimals(unallocatedPrincipal.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Remaining cap (selected): {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
+              Total shares: {userSharesFormatted} | PPS: {formatWithMaxDecimals(effectivePps, 2)} | Total value: {formatWithMaxDecimals(totalValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Allocated: {formatWithMaxDecimals(userTotalAllocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Vault: {formatWithMaxDecimals(vaultValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Available to allocate: {formatWithMaxDecimals(maxWithdrawable, 2)} | Remaining cap: {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
             </Form.Text>
           </Row>
 

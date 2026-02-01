@@ -35,8 +35,6 @@ contract dBank {
     error dBank__InsufficientAllowance();
     error dBank__InvalidStrategy();
     error dBank__AllocationFailed();
-    error dBank__SharesAllocated(uint256 allocatedShares);
-    
     // State Variables
     Token public immutable asset;
     address public owner;
@@ -168,7 +166,7 @@ contract dBank {
 
     function convertToAssets(uint256 _shares) external view returns (uint256 assets) {
         if (totalSupply == 0) {
-            assets = 0;
+            assets = _shares; // 1:1 ratio when no shares exist (matches convertToShares)
         } else {
             assets = _shares * this.totalAssets() / totalSupply;
         }
@@ -191,14 +189,26 @@ contract dBank {
 
     function maxWithdraw(address _owner) external view returns (uint256) {
         uint256 ownerAssets = this.convertToAssets(balanceOf[_owner]);
-        if (perTxCap > 0 && ownerAssets > perTxCap) {
-            return perTxCap;
+
+        // Cap to buffer (unallocated capital) — users cannot pull from strategies
+        uint256 maxAmount = ownerAssets;
+        if (maxAmount > buffer) {
+            maxAmount = buffer;
         }
-        return ownerAssets;
+        if (perTxCap > 0 && maxAmount > perTxCap) {
+            maxAmount = perTxCap;
+        }
+        return maxAmount;
     }
 
     function maxRedeem(address _owner) external view returns (uint256) {
         uint256 ownerShares = balanceOf[_owner];
+
+        // Cap to buffer (unallocated capital) — users cannot pull from strategies
+        uint256 bufferShares = this.convertToShares(buffer);
+        if (ownerShares > bufferShares) {
+            ownerShares = bufferShares;
+        }
         if (perTxCap > 0) {
             uint256 capShares = this.convertToShares(perTxCap);
             if (ownerShares > capShares) {
@@ -274,33 +284,21 @@ contract dBank {
     function withdraw(uint256 _assets, address _receiver, address _owner) external whenNotPaused validAddress(_receiver) validAddress(_owner) returns (uint256 shares) {
         // 1. Verify assets
         if (_assets == 0) revert dBank__InvalidAmount();
-        // 2. Verify assets <= maxWithdraw(owner)
+        // 2. Verify assets <= maxWithdraw(owner) — enforces buffer, perTxCap, and ownerAssets caps
         if (_assets > this.maxWithdraw(_owner)) revert dBank__CapExceeded(_assets, this.maxWithdraw(_owner));
         // 3. Convert to shares
         shares = this.convertToShares(_assets);
         // 4. Verify shares <= balanceOf[owner]
         if (shares > balanceOf[_owner]) revert dBank__InsufficientShares();
-        // 4.5. Prevent withdrawals while user has allocated shares
-        _revertIfAllocatedShares(_owner, shares);
+        // 4.5. Handle approval if owner != msg.sender
+        if (_owner != msg.sender) {
+            if (allowance[_owner][msg.sender] < shares) revert dBank__InsufficientAllowance();
+            allowance[_owner][msg.sender] -= shares;
+        }
         // 5. Burn shares from owner
         _burn(_owner, shares);
-        // 6. Serve withdrawal
-        if (_assets <= buffer) {
-            // Serve from buffer
-            buffer -= _assets;
-        } else {
-            // Serve from buffer + withdraw from router (sync)
-            uint256 bufferToServe = buffer;
-            uint256 assetsToWithdraw = _assets - bufferToServe;
-            buffer = 0;
-
-            // Withdraw from strategies via router
-            uint256 maxSlippageBps = ConfigManager(configManager).maxSlippageBps();
-            uint256 withdrawn = _withdrawFromStrategies(assetsToWithdraw, maxSlippageBps);
-            if (withdrawn < assetsToWithdraw) {
-                revert dBank__InsufficientLiquidity(assetsToWithdraw, withdrawn);
-            }
-        }
+        // 6. Serve withdrawal from buffer only (strategies are not auto-pulled)
+        buffer -= _assets;
         // 7. Transfer assets to receiver
         asset.transfer(_receiver, _assets);
         // 8. Emit event
@@ -313,8 +311,8 @@ contract dBank {
         if (_shares == 0) revert dBank__InvalidAmount();
         // 2. Calculate assets
         assets = this.convertToAssets(_shares);
-        // 2.5. Prevent redemptions while user has allocated shares
-        _revertIfAllocatedShares(_owner, _shares);
+        // 2.5. Verify assets <= buffer (users cannot pull from strategies)
+        if (assets > buffer) revert dBank__InsufficientLiquidity(assets, buffer);
         // 3. Handle approval if owner != msg.sender
         if (_owner != msg.sender) {
             if (allowance[_owner][msg.sender] < _shares) revert dBank__InsufficientAllowance();
@@ -322,21 +320,8 @@ contract dBank {
         }
         // 4. Burn shares from owner
         _burn(_owner, _shares);
-        // 5. Serve withdrawal
-        if (assets <= buffer) {
-            buffer -= assets;
-        } else {
-            uint256 bufferToServe = buffer;
-            uint256 assetsToWithdraw = assets - bufferToServe;
-            buffer = 0;
-
-            // Withdraw from strategies via router
-            uint256 maxSlippageBps = ConfigManager(configManager).maxSlippageBps();
-            uint256 withdrawn = _withdrawFromStrategies(assetsToWithdraw, maxSlippageBps);
-            if (withdrawn < assetsToWithdraw) {
-                revert dBank__InsufficientLiquidity(assetsToWithdraw, withdrawn);
-            }
-        }
+        // 5. Serve withdrawal from buffer only
+        buffer -= assets;
         // 6. Transfer assets to receiver
         asset.transfer(_receiver, assets);
         // 7. Emit event
@@ -386,10 +371,9 @@ contract dBank {
     function _transfer(address _from, address _to, uint256 _amount) internal {
         if (_to == address(0)) revert dBank__ZeroAddress();
         if (balanceOf[_from] < _amount) revert dBank__InsufficientShares();
-        
         balanceOf[_from] -= _amount;
         balanceOf[_to] += _amount;
-        
+
         emit Transfer(_from, _to, _amount);
     }
 
@@ -409,30 +393,6 @@ contract dBank {
         totalSupply -= _amount;
         
         emit Transfer(_from, address(0), _amount);
-    }
-
-    /**
-     * @notice This function was removed because it contained a bug.
-     * 
-     * THE BUG: The function assumed that tokens allocated to strategies via 
-     * StrategyRouter came from the dBank vault, but they actually come from 
-     * the user's wallet (see StrategyRouter.depositToStrategy line 302:
-     * token.transferFrom(msg.sender, address(this), _amount)).
-     * 
-     * This caused users to be unable to withdraw their dBank deposits even 
-     * though their strategy allocations were completely separate.
-     * 
-     * SOLUTION: Removed the check entirely. The dBank vault and strategy 
-     * allocations are independent systems. Users can withdraw their full 
-     * vault balance regardless of their strategy allocations.
-     * 
-     * If in the future we want to link vault shares with strategy allocations,
-     * the StrategyRouter.depositToStrategy function should withdraw tokens 
-     * from dBank (burning shares) instead of from the user's wallet directly.
-     */
-    function _revertIfAllocatedShares(address /* _owner */, uint256 /* _requestedShares */) internal pure {
-        // No-op: Strategy allocations don't affect vault withdrawals
-        // See comment above for explanation of the bug that was fixed
     }
 
     //===========================================================

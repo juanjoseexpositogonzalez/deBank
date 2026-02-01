@@ -556,7 +556,7 @@ export const loadBalances = async(dBank, tokens, account, dispatch) => {
 }
 
 // ----------------------------------------------------------
-// LOAD DEPOSITORS (from Deposit events)
+// LOAD DEPOSITORS (from Deposit + Transfer events)
 // Uses a single totalAssets/totalSupply snapshot for all depositors
 // to ensure consistency with the rest of the UI.
 export const loadDepositors = async (dBank, dispatch) => {
@@ -567,28 +567,48 @@ export const loadDepositors = async (dBank, dispatch) => {
         const totalAssetsBN = await dBank.totalAssets();
         const totalSupplyBN = await dBank.totalSupply();
 
-        // Query Deposit events to find unique depositor addresses
+        const addressZero = '0x0000000000000000000000000000000000000000';
+
+        // Query Deposit events to find depositor addresses
         let depositEvents = [];
         try {
             const depositFilter = dBank.filters.Deposit();
             depositEvents = await dBank.queryFilter(depositFilter);
         } catch (filterError) {
-            // Public RPCs may reject unbounded log queries; retry with explicit range
             console.warn('queryFilter failed, retrying with explicit block range:', filterError.message);
             try {
                 const depositFilter = dBank.filters.Deposit();
                 depositEvents = await dBank.queryFilter(depositFilter, 0, 'latest');
             } catch (retryError) {
-                console.error('queryFilter retry failed:', retryError.message);
-                dispatch(setDepositorsList([]));
-                return;
+                console.error('Deposit queryFilter retry failed:', retryError.message);
             }
         }
 
-        // Collect unique depositor addresses from the 'owner' field (share receiver)
+        // Query Transfer events to catch share recipients via ERC-20 transfer
+        let transferEvents = [];
+        try {
+            const transferFilter = dBank.filters.Transfer();
+            transferEvents = await dBank.queryFilter(transferFilter);
+        } catch (filterError) {
+            console.warn('Transfer queryFilter failed, retrying with explicit block range:', filterError.message);
+            try {
+                const transferFilter = dBank.filters.Transfer();
+                transferEvents = await dBank.queryFilter(transferFilter, 0, 'latest');
+            } catch (retryError) {
+                console.error('Transfer queryFilter retry failed:', retryError.message);
+            }
+        }
+
+        // Collect unique addresses from both event types
         const uniqueAddresses = new Set();
         for (const event of depositEvents) {
             uniqueAddresses.add(event.args.owner);
+        }
+        for (const event of transferEvents) {
+            // Exclude address(0) recipients (mint events already covered by Deposit)
+            if (event.args.to !== addressZero) {
+                uniqueAddresses.add(event.args.to);
+            }
         }
 
         // For each unique depositor, get current shares and compute USDC value locally
@@ -1044,58 +1064,41 @@ export const allocateToStrategy = async (provider, strategyRouter, tokens, accou
         let userBalance = await tokens[0].balanceOf(account);
         console.log('allocateToStrategy - User token balance:', ethers.utils.formatUnits(userBalance, 18));
         
-        // If user doesn't have enough tokens but has shares in dBank, withdraw tokens first
-        if (userBalance.lt(amountInWei) && dBank) {
+        // ALWAYS withdraw from vault first — allocations reduce the user's vault position.
+        // This ensures totalValue = vaultShares*PPS + allocatedValue stays correct
+        // (no double-counting) and maxWithdraw naturally caps to unallocated funds.
+        if (dBank) {
             try {
-                // Check user shares in dBank
                 const userShares = await dBank.balanceOf(account);
                 console.log('allocateToStrategy - User shares in dBank:', ethers.utils.formatUnits(userShares, 18));
-                
+
                 if (userShares.gt(0)) {
-                    // Check if user has allocated shares (can't withdraw if allocated)
-                    const userTotalAllocated = await strategyRouter.getUserTotalAllocated(account);
-                    console.log('allocateToStrategy - User total allocated:', ethers.utils.formatUnits(userTotalAllocated, 18));
-                    
-                    // Calculate how much we need to withdraw
-                    const neededTokens = amountInWei.sub(userBalance);
-                    
-                    // Convert needed tokens to shares (to check if user has enough)
-                    const neededShares = await dBank.convertToShares(neededTokens);
-                    
-                    // Check if user has allocated shares (can't withdraw if allocated)
-                    // Convert allocated tokens to shares to check unallocated shares
-                    const allocatedShares = userTotalAllocated.gt(0) 
-                        ? await dBank.convertToShares(userTotalAllocated)
-                        : ethers.BigNumber.from(0);
-                    const unallocatedShares = userShares.sub(allocatedShares);
-                    
-                    console.log('allocateToStrategy - Needed tokens:', ethers.utils.formatUnits(neededTokens, 18));
-                    console.log('allocateToStrategy - Needed shares:', ethers.utils.formatUnits(neededShares, 18));
-                    console.log('allocateToStrategy - User total shares:', ethers.utils.formatUnits(userShares, 18));
-                    console.log('allocateToStrategy - Allocated shares:', ethers.utils.formatUnits(allocatedShares, 18));
-                    console.log('allocateToStrategy - Unallocated shares:', ethers.utils.formatUnits(unallocatedShares, 18));
-                    
-                    if (unallocatedShares.gte(neededShares)) {
-                        // Withdraw tokens from dBank to cover the shortfall
-                        console.log('allocateToStrategy - Withdrawing tokens from dBank to cover allocation...');
-                        const dBankWithSigner = dBank.connect(signer);
-                        const withdrawTx = await dBankWithSigner.withdraw(neededTokens, account, account);
-                        console.log('allocateToStrategy - Withdraw tx hash:', withdrawTx.hash);
-                        await withdrawTx.wait();
-                        console.log('allocateToStrategy - Withdraw confirmed');
-                        
-                        // Refresh balance after withdrawal
-                        userBalance = await tokens[0].balanceOf(account);
-                        console.log('allocateToStrategy - User token balance after withdraw:', ethers.utils.formatUnits(userBalance, 18));
-                    } else {
-                        const errorMsg = `Insufficient unallocated shares. You have ${ethers.utils.formatUnits(unallocatedShares, 18)} unallocated shares but need ${ethers.utils.formatUnits(neededShares, 18)} to allocate ${amount} tokens.`;
-                        console.error('allocateToStrategy - Insufficient unallocated shares:', errorMsg);
+                    // Check how much we can withdraw (capped by buffer, perTxCap, user assets)
+                    const maxWithdrawBN = await dBank.maxWithdraw(account);
+                    console.log('allocateToStrategy - Max withdrawable from vault:', ethers.utils.formatUnits(maxWithdrawBN, 18));
+
+                    if (amountInWei.gt(maxWithdrawBN)) {
+                        const errorMsg = `Cannot allocate ${amount}. Max available from vault: ${ethers.utils.formatUnits(maxWithdrawBN, 18)} (limited by vault buffer).`;
+                        console.error('allocateToStrategy -', errorMsg);
                         return { ok: false, hash: null, error: errorMsg };
                     }
+
+                    // Withdraw full allocation amount from vault (burns shares)
+                    console.log('allocateToStrategy - Withdrawing from vault:', ethers.utils.formatUnits(amountInWei, 18));
+                    const dBankWithSigner = dBank.connect(signer);
+                    const withdrawTx = await dBankWithSigner.withdraw(amountInWei, account, account);
+                    console.log('allocateToStrategy - Vault withdraw tx:', withdrawTx.hash);
+                    await withdrawTx.wait();
+                    console.log('allocateToStrategy - Vault withdraw confirmed');
+
+                    userBalance = await tokens[0].balanceOf(account);
+                    console.log('allocateToStrategy - Balance after vault withdraw:', ethers.utils.formatUnits(userBalance, 18));
+                } else {
+                    return { ok: false, hash: null, error: 'No vault shares to allocate from. Please deposit to the vault first.' };
                 }
             } catch (withdrawError) {
-                console.error('allocateToStrategy - Error withdrawing from dBank:', withdrawError);
-                // Continue with original error if withdraw fails
+                console.error('allocateToStrategy - Vault withdrawal failed:', withdrawError);
+                return { ok: false, hash: null, error: `Vault withdrawal failed: ${withdrawError.message}` };
             }
         }
         
@@ -1353,23 +1356,14 @@ export const loadChartData = async (provider, dBank, strategyRouter, account, di
         }
 
         // Calculate total user value
-        // This matches the calculation in Strategies.js:
-        // - unallocatedPrincipal = totalShares - allocatedPrincipal (value is 1:1 with USDC)
-        // - totalValue = allocatedValue (with yield) + unallocatedPrincipal
-        // 
-        // The unallocated shares are NOT multiplied by vaultPricePerShare because:
-        // 1. They haven't generated yield in strategies
-        // 2. The model treats them as having 1:1 value with USDC
-        // 3. This ensures consistency with Strategies.js and Withdraw.js
-        
-        const unallocatedShares = Math.max(userShares - allocatedPrincipal, 0);
-        const unallocatedValue = unallocatedShares; // 1:1 with USDC, not multiplied by PPS
-        const totalUserValue = unallocatedValue + allocatedValue;
+        // Vault shares are valued at shares * PPS (price per share)
+        // Strategy allocations are valued separately based on strategy totalAssets
+        const vaultValue = userShares * vaultPricePerShare;
+        const totalUserValue = vaultValue + allocatedValue;
 
         // Calculate effective price per share for this user
-        // This represents what 1 share is "worth" considering their allocation mix
-        const effectivePricePerShare = userShares > 0 
-            ? totalUserValue / userShares 
+        const effectivePricePerShare = userShares > 0
+            ? totalUserValue / userShares
             : vaultPricePerShare;
 
         // Debug logging
@@ -1377,10 +1371,8 @@ export const loadChartData = async (provider, dBank, strategyRouter, account, di
             timestamp: new Date(currentTimestamp).toISOString(),
             vaultPPS: vaultPricePerShare.toFixed(6),
             userShares: userShares.toFixed(4),
-            allocatedPrincipal: allocatedPrincipal.toFixed(4),
+            vaultValue: vaultValue.toFixed(4),
             allocatedValue: allocatedValue.toFixed(4),
-            unallocatedShares: unallocatedShares.toFixed(4),
-            unallocatedValue: unallocatedValue.toFixed(4),
             totalUserValue: totalUserValue.toFixed(4),
             effectivePPS: effectivePricePerShare.toFixed(6),
         });
