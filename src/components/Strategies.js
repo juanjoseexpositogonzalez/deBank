@@ -242,8 +242,35 @@ const Strategies = () => {
         
         // Show detailed error message if allocation failed
         if (!ok && res.error) {
+          // Refresh state even on failure — vault state may have changed
+          // (e.g., auto-redeposit occurred after failed strategy deposit)
+          try {
+            if (dBank && tokens && account) {
+              await loadBalances(dBank, tokens, account, dispatch);
+            }
+            if (strategyRouter && account) {
+              await loadUserStrategyAllocations(strategyRouter, account, dispatch);
+            }
+            if (provider && chainId) {
+              await loadStrategyRouter(provider, chainId, dispatch);
+            }
+            if (dBank) {
+              await loadDepositors(dBank, dispatch);
+            }
+            if (dBank && account) {
+              try {
+                const maxBN = await dBank.maxWithdraw(account);
+                setMaxWithdrawable(ethers.utils.formatUnits(maxBN, 18));
+              } catch { /* ignore */ }
+            }
+          } catch (refreshError) {
+            console.error("Error refreshing state after failed allocation:", refreshError);
+          }
+
           alert(`Allocation failed: ${res.error}`);
           setIsAllocating(false);
+          setIsSuccess(false);
+          setShowAlert(true);
           return;
         }
         if (ok && account && res.hash) {
