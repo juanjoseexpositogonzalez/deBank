@@ -157,6 +157,10 @@ async function main() {
     const CONFIG_STRATEGY_CAP_S2 = tokens6(50000); // 50K tokens
     const CONFIG_STRATEGY_CAP_S3 = tokens6(25000); // 25K tokens
 
+    // MockS1 parameters
+    const MOCKS1_APR_BPS = 500;            // 5% APR (500 basis points)
+    const MOCKS1_CAP = tokens(1000000);     // 1M tokens cap
+
     // Amounts to fund test accounts (reduced on Sepolia)
     const USER_BALANCE = tokens(isSepolia ? 500 : 100000);
 
@@ -565,6 +569,49 @@ async function main() {
     // Check if vault has approved router (if needed for future operations)
     const vaultRouterAllowance = await token.allowance(DBANK_ADDRESS, STRATEGY_ROUTER_ADDRESS);
     console.log(`  Vault's allowance to router: ${ethers.utils.formatEther(vaultRouterAllowance)} tokens\n`);
+
+    console.log("==========================================");
+    console.log("STEP 3.6: Configure MockS1 Parameters");
+    console.log("==========================================\n");
+
+    if (mockS1) {
+        const mockS1Owner = await mockS1.owner();
+        if (mockS1Owner.toLowerCase() !== deployer.address.toLowerCase()) {
+            console.log(`  WARNING: Deployer (${deployer.address}) is not MockS1 owner (${mockS1Owner})`);
+            console.log(`    MockS1 parameter configuration will be skipped.\n`);
+        } else {
+            const [currentAprBps, currentCap, currentPaused] = await mockS1.params();
+
+            const needsUpdate = currentAprBps.toString() !== MOCKS1_APR_BPS.toString()
+                             || !currentCap.eq(MOCKS1_CAP);
+
+            if (needsUpdate) {
+                console.log(`  Current MockS1 params: APR=${currentAprBps} bps, Cap=${ethers.utils.formatEther(currentCap)} tokens`);
+                console.log(`  Configuring MockS1: APR=${MOCKS1_APR_BPS} bps (${MOCKS1_APR_BPS/100}%), Cap=${ethers.utils.formatEther(MOCKS1_CAP)} tokens...`);
+                const tx = await mockS1.setParams(MOCKS1_APR_BPS, MOCKS1_CAP, await getTxOptions());
+                await tx.wait();
+                console.log(`  MockS1 params configured successfully\n`);
+            } else {
+                console.log(`  MockS1 params already configured correctly:`);
+                console.log(`    APR: ${currentAprBps} bps (${currentAprBps.toNumber()/100}%)`);
+                console.log(`    Cap: ${ethers.utils.formatEther(currentCap)} tokens\n`);
+            }
+
+            // Ensure MockS1 is not paused
+            if (currentPaused) {
+                console.log(`  Unpausing MockS1...`);
+                const tx = await mockS1.pause(false, await getTxOptions());
+                await tx.wait();
+                console.log(`  MockS1 unpaused\n`);
+            } else {
+                console.log(`  MockS1 is not paused\n`);
+            }
+        }
+    } else {
+        console.log(`  MockS1 contract not available. Skipping parameter configuration.`);
+        console.log(`  NOTE: If MockS1 is registered in StrategyRouter but params are not configured,`);
+        console.log(`  deposits to Strategy S1 will fail with MockS1__CapExceeded.\n`);
+    }
 
     console.log("==========================================");
     console.log("STEP 5: Final State and Validations");
