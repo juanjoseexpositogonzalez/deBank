@@ -1306,7 +1306,6 @@ export const loadChartData = async (provider, dBank, strategyRouter, account, di
         const userShares = parseFloat(ethers.utils.formatUnits(userSharesBN, 18));
 
         // Now calculate strategy allocations value
-        let allocatedPrincipal = 0;
         let allocatedValue = 0;
 
         if (strategyRouter) {
@@ -1320,12 +1319,11 @@ export const loadChartData = async (provider, dBank, strategyRouter, account, di
                     try {
                         const allocationBN = await strategyRouter.getUserStrategyAllocation(account, i);
                         if (allocationBN.gt(0)) {
-                            const allocation = parseFloat(ethers.utils.formatUnits(allocationBN, 18));
-                            allocatedPrincipal += allocation;
+                            const allocationPrincipal = parseFloat(ethers.utils.formatUnits(allocationBN, 18));
 
                             // Get current value of this allocation
                             const [strategyAddr, , , strategyAllocatedBN] = await strategyRouter.getStrategy(i);
-                            
+
                             if (strategyAddr && strategyAddr !== ethers.constants.AddressZero && strategyAllocatedBN.gt(0)) {
                                 try {
                                     const strategy = new ethers.Contract(
@@ -1334,16 +1332,16 @@ export const loadChartData = async (provider, dBank, strategyRouter, account, di
                                         provider
                                     );
                                     const strategyTotalAssetsBN = await strategy.totalAssets();
-                                    
+
                                     // User's share of strategy = (userAllocation / strategyAllocated) * strategyTotalAssets
                                     const allocationValueBN = allocationBN.mul(strategyTotalAssetsBN).div(strategyAllocatedBN);
                                     allocatedValue += parseFloat(ethers.utils.formatUnits(allocationValueBN, 18));
                                 } catch (strategyError) {
                                     // If can't get strategy value, use principal as fallback
-                                    allocatedValue += allocation;
+                                    allocatedValue += allocationPrincipal;
                                 }
                             } else {
-                                allocatedValue += allocation;
+                                allocatedValue += allocationPrincipal;
                             }
                         }
                     } catch (allocError) {

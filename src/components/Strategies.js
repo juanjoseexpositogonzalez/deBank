@@ -25,20 +25,6 @@ const formatWithMaxDecimals = (value, maxDecimals = 4) => {
   }
 };
 
-const toWei = (v) => {
-  try {
-    if (v === null || v === undefined) return ethers.BigNumber.from(0);
-    if (Array.isArray(v)) return ethers.BigNumber.from(0);
-    if (ethers.BigNumber.isBigNumber(v)) return v;
-    const asString = String(v);
-    if (!asString || asString === 'undefined') return ethers.BigNumber.from(0);
-    if (asString.includes('.')) return ethers.utils.parseUnits(asString, 18);
-    return ethers.BigNumber.from(asString);
-  } catch {
-    return ethers.BigNumber.from(0);
-  }
-};
-
 const Strategies = () => {
   const dispatch = useDispatch();
 
@@ -50,7 +36,6 @@ const Strategies = () => {
 
   const userShares = useSelector(state => state.dBank.shares) || "0";
   const [userSharesOnChain, setUserSharesOnChain] = useState(null);
-  const [allocationSharesByStrategy, setAllocationSharesByStrategy] = useState([]);
   const [vaultPricePerShare, setVaultPricePerShare] = useState("1");
   const [maxWithdrawable, setMaxWithdrawable] = useState("0");
   const userSharesStr = useMemo(() => {
@@ -158,7 +143,6 @@ const Strategies = () => {
       if (!dBank || !account) {
         if (!cancelled) {
           setUserSharesOnChain(null);
-          setAllocationSharesByStrategy([]);
           setVaultPricePerShare("1");
         }
         return;
@@ -180,31 +164,9 @@ const Strategies = () => {
           setUserSharesOnChain(currentShares);
         }
 
-        const allocationsSource = userStrategyAllocationsValue.length > 0
-          ? userStrategyAllocationsValue
-          : userStrategyAllocations;
-
-        if (allocationsSource && allocationsSource.length > 0) {
-          const allocationsInShares = [];
-          for (let idx = 0; idx < allocationsSource.length; idx++) {
-            const allocAssets = parseFloat(allocationsSource[idx] || "0");
-            if (allocAssets > 0) {
-              const allocShares = pps > 0 ? allocAssets / pps : 0;
-              allocationsInShares[idx] = allocShares;
-            } else {
-              allocationsInShares[idx] = 0;
-            }
-          }
-          if (!cancelled) {
-            setAllocationSharesByStrategy(allocationsInShares);
-          }
-        } else if (!cancelled) {
-          setAllocationSharesByStrategy([]);
-        }
       } catch (error) {
         if (!cancelled) {
           setUserSharesOnChain(null);
-          setAllocationSharesByStrategy([]);
         }
       }
     };
