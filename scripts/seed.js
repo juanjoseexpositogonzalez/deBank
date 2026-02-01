@@ -45,11 +45,15 @@ async function main() {
     const increasedGasPrice = gasPrice.mul(150).div(100); // Increase by 50%
     console.log(`Gas price: ${ethers.utils.formatUnits(gasPrice, 'gwei')} gwei (using ${ethers.utils.formatUnits(increasedGasPrice, 'gwei')} gwei)\n`);
 
-    // Helper function to get transaction options with sequential nonce counter
-    // Using a manual counter avoids race conditions on fast chains (Base Sepolia)
-    let nonce = await deployer.getTransactionCount("pending");
-    console.log(`Starting with nonce: ${nonce}\n`);
+    const isLocalhost = network === "localhost" || network === "hardhat" || chainId === 31337;
+
+    // Helper function to get transaction options.
+    // - Localhost/Hardhat: no manual nonce (automining handles it instantly)
+    // - Testnets: sequential nonce counter to avoid race conditions on fast chains
+    let nonce = isLocalhost ? 0 : await deployer.getTransactionCount("pending");
+    if (!isLocalhost) console.log(`Starting with nonce: ${nonce}\n`);
     const getTxOptions = () => {
+        if (isLocalhost) return {};
         return {
             nonce: nonce++,
             gasPrice: increasedGasPrice
