@@ -10,6 +10,7 @@ import {
     withdrawFunds,
     loadBalances,
     loadDepositors,
+    loadUserStrategyAllocations,
 } from '../store/interactions';
 import { formatWithMaxDecimals, getExplorerUrl, truncateAddress } from '../utils/format';
 
@@ -40,6 +41,8 @@ const Withdraw = () => {
     const shares = useSelector(state => state.dBank.shares);
     const balances = useSelector(state => state.tokens.balances);
     const dBank = useSelector(state => state.dBank.contract);
+    const strategyRouter = useSelector(state => state.strategyRouter.contract);
+    const userTotalAllocated = useSelector(state => state.strategyRouter.userTotalAllocated || "0");
     const depositorsList = useSelector(state => state.dBank.depositors.list);
     const depositorsLoading = useSelector(state => state.dBank.depositors.isLoading);
 
@@ -78,12 +81,18 @@ const Withdraw = () => {
         refreshData();
     }, [account, dBank, tokens, dispatch, refreshMaxWithdraw]);
 
-    // Refresh after successful withdraw (balances + maxWithdraw cap)
+    // Refresh maxWithdraw when allocations change (e.g. from Strategies page)
+    useEffect(() => {
+        refreshMaxWithdraw();
+    }, [userTotalAllocated, refreshMaxWithdraw]);
+
+    // Refresh after successful withdraw (balances + maxWithdraw cap + allocations)
     useEffect(() => {
         if (isWithdrawSuccess && dBank && tokens && account) {
             const refreshAfterWithdraw = async () => {
                 try {
                     await loadBalances(dBank, tokens, account, dispatch);
+                    await loadUserStrategyAllocations(dBank, account, dispatch, strategyRouter);
                     await loadDepositors(dBank, dispatch);
                     await refreshMaxWithdraw();
                 } catch (error) {
@@ -92,7 +101,7 @@ const Withdraw = () => {
             };
             refreshAfterWithdraw();
         }
-    }, [isWithdrawSuccess, dBank, tokens, account, dispatch, refreshMaxWithdraw]);
+    }, [isWithdrawSuccess, dBank, tokens, account, dispatch, refreshMaxWithdraw, strategyRouter]);
 
     // Periodic refresh of depositors (every 30s)
     useEffect(() => {

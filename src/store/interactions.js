@@ -965,6 +965,18 @@ const parseWithdrawError = (error) => {
     const errorString = error.message || error.toString();
     
     // Check for dBank custom errors
+    if (errorString.includes('dBank__InsufficientUnallocated')) {
+        const match = errorString.match(/dBank__InsufficientUnallocated\((\d+),\s*(\d+)\)/);
+        if (match) {
+            try {
+                const requested = ethers.utils.formatUnits(match[1], 18);
+                const available = ethers.utils.formatUnits(match[2], 18);
+                return `Cannot withdraw: ${parseFloat(requested).toFixed(4)} exceeds your unallocated balance of ${parseFloat(available).toFixed(4)} tokens. Please un-allocate from strategies first.`;
+            } catch { /* fallthrough */ }
+        }
+        return 'Cannot withdraw: Amount exceeds your unallocated balance. Please un-allocate from strategies first.';
+    }
+
     if (errorString.includes('dBank__SharesAllocated')) {
         // Extract the allocated shares amount from the error
         const match = errorString.match(/dBank__SharesAllocated\((\d+)\)/);

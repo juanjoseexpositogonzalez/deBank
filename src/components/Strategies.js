@@ -67,6 +67,7 @@ const Strategies = () => {
   const [isSuccess, setIsSuccess] = useState(false);
   const [txHash, setTxHash] = useState(null);
   const [showAlert, setShowAlert] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(null);
   const [mode, setMode] = useState('allocate'); // 'allocate' | 'unallocate'
 
   const explorerMap = {
@@ -268,7 +269,7 @@ const Strategies = () => {
             console.error("Error refreshing state after failed allocation:", refreshError);
           }
 
-          alert(`Allocation failed: ${res.error}`);
+          setErrorMessage(res.error);
           setIsAllocating(false);
           setIsSuccess(false);
           setShowAlert(true);
@@ -294,6 +295,24 @@ const Strategies = () => {
         const res = await unallocateFromStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch, 50, dBank);
         ok = res.ok;
         hash = res.hash || null;
+
+        if (!ok && res.error) {
+          // Refresh state even on failure
+          try {
+            if (dBank && tokens && account) await loadBalances(dBank, tokens, account, dispatch);
+            if (dBank && account) await loadUserStrategyAllocations(dBank, account, dispatch, strategyRouter);
+            if (provider && chainId) await loadStrategyRouter(provider, chainId, dispatch);
+            if (dBank) await loadDepositors(dBank, dispatch);
+          } catch (refreshError) {
+            console.error("Error refreshing state after failed un-allocation:", refreshError);
+          }
+
+          setErrorMessage(res.error);
+          setIsAllocating(false);
+          setIsSuccess(false);
+          setShowAlert(true);
+          return;
+        }
       }
       if (ok) {
         // Wait a bit for transaction confirmation
@@ -333,6 +352,7 @@ const Strategies = () => {
     setIsAllocating(false);
     setIsSuccess(ok);
     setTxHash(hash);
+    if (ok) setErrorMessage(null);
     setShowAlert(true);
     if (ok) {
       setAmount('');
@@ -383,7 +403,7 @@ const Strategies = () => {
 
           <Row className='my-2 text-end'>
             <Form.Text style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
-              Total shares: {userSharesFormatted} | PPS: {formatWithMaxDecimals(effectivePps, 2)} | Total value: {formatWithMaxDecimals(totalValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Allocated: {formatWithMaxDecimals(userTotalAllocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Unallocated: {formatWithMaxDecimals((totalValue - parseFloat(userTotalAllocatedValue || "0")).toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Available to allocate: {formatWithMaxDecimals(maxWithdrawable, 2)} | Remaining cap: {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
+              Total shares: {userSharesFormatted} | PPS: {formatWithMaxDecimals(effectivePps, 2)} | Total value: {formatWithMaxDecimals(totalValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Allocated: {formatWithMaxDecimals(userTotalAllocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Unallocated: {formatWithMaxDecimals(Math.max(0, totalValue - parseFloat(userTotalAllocatedValue || "0")).toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Available to allocate: {formatWithMaxDecimals(maxWithdrawable, 2)} | Remaining cap: {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
             </Form.Text>
           </Row>
 
@@ -539,11 +559,12 @@ const Strategies = () => {
         />
       ) : !isSuccess && showAlert ? (
         <Alert
-          message={'Allocation Failed'}
+          message={mode === 'allocate' ? 'Allocation Failed' : 'Un-allocation Failed'}
           transactionHash={txHash}
           variant={'danger'}
           setShowAlert={setShowAlert}
           explorerBaseUrl={explorerBaseUrl}
+          errorDetails={errorMessage}
           />
         ) : (
           <></>
