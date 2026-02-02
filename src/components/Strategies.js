@@ -102,9 +102,10 @@ const Strategies = () => {
     return totalShares * pps;
   }, [displaySharesStr, vaultPricePerShare]);
 
-  const totalValue = useMemo(() => {
-    return parseFloat(userTotalAllocatedValue || "0") + vaultValue;
-  }, [userTotalAllocatedValue, vaultValue]);
+  // Total value = shares * PPS (already includes allocated + unallocated)
+  // PPS = totalAssets / totalSupply, where totalAssets = buffer + strategy assets
+  // So shares * PPS = user's total value (allocated + unallocated)
+  const totalValue = useMemo(() => vaultValue, [vaultValue]);
 
   const effectivePps = useMemo(() => {
     return parseFloat(vaultPricePerShare) || 1;
@@ -249,7 +250,7 @@ const Strategies = () => {
               await loadBalances(dBank, tokens, account, dispatch);
             }
             if (strategyRouter && account) {
-              await loadUserStrategyAllocations(strategyRouter, account, dispatch);
+              await loadUserStrategyAllocations(dBank, account, dispatch, strategyRouter);
             }
             if (provider && chainId) {
               await loadStrategyRouter(provider, chainId, dispatch);
@@ -290,7 +291,7 @@ const Strategies = () => {
           }
         }
       } else {
-        const res = await unallocateFromStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch, 50);
+        const res = await unallocateFromStrategy(provider, strategyRouter, tokens, account, amount, Number(selectedId), dispatch, 50, dBank);
         ok = res.ok;
         hash = res.hash || null;
       }
@@ -303,10 +304,10 @@ const Strategies = () => {
           await loadBalances(dBank, tokens, account, dispatch);
         }
         
-        if (strategyRouter && account) {
-          await loadUserStrategyAllocations(strategyRouter, account, dispatch);
+        if (dBank && account) {
+          await loadUserStrategyAllocations(dBank, account, dispatch, strategyRouter);
         }
-        
+
         if (provider && chainId) {
           await loadStrategyRouter(provider, chainId, dispatch);
         }
@@ -351,29 +352,29 @@ const Strategies = () => {
     }
   }, [filteredStrategies, selectedId]);
 
-  // Load user allocations when component mounts or when account/strategyRouter changes
+  // Load user allocations when component mounts or when account/dBank changes
   useEffect(() => {
     const loadAllocations = async () => {
-      if (strategyRouter && account) {
+      if (dBank && account) {
         try {
-          await loadUserStrategyAllocations(strategyRouter, account, dispatch);
+          await loadUserStrategyAllocations(dBank, account, dispatch, strategyRouter);
         } catch (error) {
           console.error("Error loading user allocations in Strategies component:", error);
         }
       }
     };
     loadAllocations();
-    
+
     // Also reload allocations periodically to catch blockchain time advances
     // This ensures yield is reflected when time advances
     const interval = setInterval(() => {
-      if (strategyRouter && account) {
+      if (dBank && account) {
         loadAllocations();
       }
     }, 5000); // Reload every 5 seconds
-    
+
     return () => clearInterval(interval);
-  }, [strategyRouter, account, dispatch]);
+  }, [dBank, strategyRouter, account, dispatch]);
 
   return (
        <div>
@@ -382,7 +383,7 @@ const Strategies = () => {
 
           <Row className='my-2 text-end'>
             <Form.Text style={{ color: '#adb5bd', fontSize: '0.9rem' }}>
-              Total shares: {userSharesFormatted} | PPS: {formatWithMaxDecimals(effectivePps, 2)} | Total value: {formatWithMaxDecimals(totalValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Allocated: {formatWithMaxDecimals(userTotalAllocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Vault: {formatWithMaxDecimals(vaultValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Available to allocate: {formatWithMaxDecimals(maxWithdrawable, 2)} | Remaining cap: {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
+              Total shares: {userSharesFormatted} | PPS: {formatWithMaxDecimals(effectivePps, 2)} | Total value: {formatWithMaxDecimals(totalValue.toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Allocated: {formatWithMaxDecimals(userTotalAllocatedValue, 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Unallocated: {formatWithMaxDecimals((totalValue - parseFloat(userTotalAllocatedValue || "0")).toString(), 2)} {symbols && symbols[0] ? symbols[0] : 'USDC'} | Available to allocate: {formatWithMaxDecimals(maxWithdrawable, 2)} | Remaining cap: {selectedId ? remainingForSelectedFormatted : '—'} | Max alloc: {selectedId ? maxAllocFormatted : '—'} | Max unalloc: {selectedId ? maxUnallocateFormatted : '—'}
             </Form.Text>
           </Row>
 

@@ -42,15 +42,20 @@ async function main() {
 
     // Get gas price and increase it slightly to ensure transactions go through
     const gasPrice = await deployer.provider.getGasPrice();
-    const increasedGasPrice = gasPrice.mul(110).div(100); // Increase by 10%
+    const increasedGasPrice = gasPrice.mul(150).div(100); // Increase by 50%
     console.log(`Gas price: ${ethers.utils.formatUnits(gasPrice, 'gwei')} gwei (using ${ethers.utils.formatUnits(increasedGasPrice, 'gwei')} gwei)\n`);
 
-    // Helper function to get transaction options with current nonce and gas price
-    // For localhost, we get the nonce fresh each time to avoid conflicts
-    const getTxOptions = async () => {
-        const currentNonce = await deployer.getTransactionCount("pending");
+    const isLocalhost = network === "localhost" || network === "hardhat" || chainId === 31337;
+
+    // Helper function to get transaction options.
+    // - Localhost/Hardhat: no manual nonce (automining handles it instantly)
+    // - Testnets: sequential nonce counter to avoid race conditions on fast chains
+    let nonce = isLocalhost ? 0 : await deployer.getTransactionCount("pending");
+    if (!isLocalhost) console.log(`Starting with nonce: ${nonce}\n`);
+    const getTxOptions = () => {
+        if (isLocalhost) return {};
         return {
-            nonce: currentNonce,
+            nonce: nonce++,
             gasPrice: increasedGasPrice
         };
     };
@@ -238,7 +243,7 @@ async function main() {
         const currentLiquidityBufferBps = await configManager.liquidityBufferBps();
         if (currentLiquidityBufferBps.toString() !== CONFIG_LIQUIDITY_BUFFER_BPS.toString()) {
             console.log(`  Configuring liquidityBufferBps to ${CONFIG_LIQUIDITY_BUFFER_BPS} (${CONFIG_LIQUIDITY_BUFFER_BPS / 100}%)...`);
-            const tx = await configManager.setLiquidityBufferBps(CONFIG_LIQUIDITY_BUFFER_BPS, await getTxOptions());
+            const tx = await configManager.setLiquidityBufferBps(CONFIG_LIQUIDITY_BUFFER_BPS, getTxOptions());
             await tx.wait();
             console.log(`  ✓ liquidityBufferBps configured\n`);
         } else {
@@ -249,7 +254,7 @@ async function main() {
         const currentMaxSlippageBps = await configManager.maxSlippageBps();
         if (currentMaxSlippageBps.toString() !== CONFIG_MAX_SLIPPAGE_BPS.toString()) {
             console.log(`  Configuring maxSlippageBps to ${CONFIG_MAX_SLIPPAGE_BPS} (${CONFIG_MAX_SLIPPAGE_BPS / 10}%)...`);
-            const tx = await configManager.setMaxSlippageBps(CONFIG_MAX_SLIPPAGE_BPS, await getTxOptions());
+            const tx = await configManager.setMaxSlippageBps(CONFIG_MAX_SLIPPAGE_BPS, getTxOptions());
             await tx.wait();
             console.log(`  ✓ maxSlippageBps configured\n`);
         } else {
@@ -260,7 +265,7 @@ async function main() {
         const currentTvlGlobalCap = await configManager.tvlGlobalCap();
         if (!currentTvlGlobalCap.eq(CONFIG_TVL_GLOBAL_CAP)) {
             console.log(`  Configuring tvlGlobalCap to ${ethers.utils.formatUnits(CONFIG_TVL_GLOBAL_CAP, 6)} tokens...`);
-            const tx = await configManager.setTvlGlobalCap(CONFIG_TVL_GLOBAL_CAP, await getTxOptions());
+            const tx = await configManager.setTvlGlobalCap(CONFIG_TVL_GLOBAL_CAP, getTxOptions());
             await tx.wait();
             console.log(`  ✓ tvlGlobalCap configured\n`);
         } else {
@@ -271,7 +276,7 @@ async function main() {
         const currentConfigPerTxCap = await configManager.perTxCap();
         if (!currentConfigPerTxCap.eq(CONFIG_PER_TX_CAP)) {
             console.log(`  Configuring perTxCap to ${ethers.utils.formatUnits(CONFIG_PER_TX_CAP, 6)} tokens...`);
-            const tx = await configManager.setPerTxCap(CONFIG_PER_TX_CAP, await getTxOptions());
+            const tx = await configManager.setPerTxCap(CONFIG_PER_TX_CAP, getTxOptions());
             await tx.wait();
             console.log(`  ✓ perTxCap configured\n`);
         } else {
@@ -282,7 +287,7 @@ async function main() {
         const currentConfigPerformanceFeeBps = await configManager.performanceFeeBps();
         if (currentConfigPerformanceFeeBps.toString() !== CONFIG_PERFORMANCE_FEE_BPS.toString()) {
             console.log(`  Configuring performanceFeeBps to ${CONFIG_PERFORMANCE_FEE_BPS} (${CONFIG_PERFORMANCE_FEE_BPS / 100}%)...`);
-            const tx = await configManager.setPerformanceFeeBps(CONFIG_PERFORMANCE_FEE_BPS, await getTxOptions());
+            const tx = await configManager.setPerformanceFeeBps(CONFIG_PERFORMANCE_FEE_BPS, getTxOptions());
             await tx.wait();
             console.log(`  ✓ performanceFeeBps configured\n`);
         } else {
@@ -293,7 +298,7 @@ async function main() {
         const currentEpochDuration = await configManager.epochDuration();
         if (currentEpochDuration.toString() !== CONFIG_EPOCH_DURATION.toString()) {
             console.log(`  Configuring epochDuration to ${CONFIG_EPOCH_DURATION} days...`);
-            const tx = await configManager.setEpochDuration(CONFIG_EPOCH_DURATION, await getTxOptions());
+            const tx = await configManager.setEpochDuration(CONFIG_EPOCH_DURATION, getTxOptions());
             await tx.wait();
             console.log(`  ✓ epochDuration configured\n`);
         } else {
@@ -304,7 +309,7 @@ async function main() {
         const currentSettlementWindowUTC = await configManager.settlementWindowUTC();
         if (currentSettlementWindowUTC.toString() !== CONFIG_SETTLEMENT_WINDOW_UTC.toString()) {
             console.log(`  Configuring settlementWindowUTC to ${CONFIG_SETTLEMENT_WINDOW_UTC} seconds (${CONFIG_SETTLEMENT_WINDOW_UTC / 3600} hours)...`);
-            const tx = await configManager.setSettlementWindowUTC(CONFIG_SETTLEMENT_WINDOW_UTC, await getTxOptions());
+            const tx = await configManager.setSettlementWindowUTC(CONFIG_SETTLEMENT_WINDOW_UTC, getTxOptions());
             await tx.wait();
             console.log(`  ✓ settlementWindowUTC configured\n`);
         } else {
@@ -315,7 +320,7 @@ async function main() {
         const currentStrategyCapS1 = await configManager.strategyCapS1();
         if (!currentStrategyCapS1.eq(CONFIG_STRATEGY_CAP_S1)) {
             console.log(`  Configuring strategyCapS1 to ${ethers.utils.formatUnits(CONFIG_STRATEGY_CAP_S1, 6)} tokens...`);
-            const tx = await configManager.setStrategyCapS1(CONFIG_STRATEGY_CAP_S1, await getTxOptions());
+            const tx = await configManager.setStrategyCapS1(CONFIG_STRATEGY_CAP_S1, getTxOptions());
             await tx.wait();
             console.log(`  ✓ strategyCapS1 configured\n`);
         } else {
@@ -326,7 +331,7 @@ async function main() {
         const currentStrategyCapS2 = await configManager.strategyCapS2();
         if (!currentStrategyCapS2.eq(CONFIG_STRATEGY_CAP_S2)) {
             console.log(`  Configuring strategyCapS2 to ${ethers.utils.formatUnits(CONFIG_STRATEGY_CAP_S2, 6)} tokens...`);
-            const tx = await configManager.setStrategyCapS2(CONFIG_STRATEGY_CAP_S2, await getTxOptions());
+            const tx = await configManager.setStrategyCapS2(CONFIG_STRATEGY_CAP_S2, getTxOptions());
             await tx.wait();
             console.log(`  ✓ strategyCapS2 configured\n`);
         } else {
@@ -337,7 +342,7 @@ async function main() {
         const currentStrategyCapS3 = await configManager.strategyCapS3();
         if (!currentStrategyCapS3.eq(CONFIG_STRATEGY_CAP_S3)) {
             console.log(`  Configuring strategyCapS3 to ${ethers.utils.formatUnits(CONFIG_STRATEGY_CAP_S3, 6)} tokens...`);
-            const tx = await configManager.setStrategyCapS3(CONFIG_STRATEGY_CAP_S3, await getTxOptions());
+            const tx = await configManager.setStrategyCapS3(CONFIG_STRATEGY_CAP_S3, getTxOptions());
             await tx.wait();
             console.log(`  ✓ strategyCapS3 configured\n`);
         } else {
@@ -348,7 +353,7 @@ async function main() {
         const currentConfigFeeRecipient = await configManager.feeRecipient();
         if (currentConfigFeeRecipient === ethers.constants.AddressZero || currentConfigFeeRecipient.toLowerCase() !== deployer.address.toLowerCase()) {
             console.log(`  Configuring feeRecipient to ${deployer.address}...`);
-            const tx = await configManager.setFeeRecipient(deployer.address, await getTxOptions());
+            const tx = await configManager.setFeeRecipient(deployer.address, getTxOptions());
             await tx.wait();
             console.log(`  ✓ feeRecipient configured\n`);
         } else {
@@ -359,7 +364,7 @@ async function main() {
         const currentPrimaryOracle = await configManager.primaryOracle();
         if (currentPrimaryOracle === ethers.constants.AddressZero || currentPrimaryOracle.toLowerCase() !== deployer.address.toLowerCase()) {
             console.log(`  Configuring primaryOracle to ${deployer.address}...`);
-            const tx = await configManager.setPrimaryOracle(deployer.address, await getTxOptions());
+            const tx = await configManager.setPrimaryOracle(deployer.address, getTxOptions());
             await tx.wait();
             console.log(`  ✓ primaryOracle configured\n`);
         } else {
@@ -370,7 +375,7 @@ async function main() {
         const currentPauser = await configManager.pauser();
         if (currentPauser === ethers.constants.AddressZero || currentPauser.toLowerCase() !== deployer.address.toLowerCase()) {
             console.log(`  Configuring pauser to ${deployer.address}...`);
-            const tx = await configManager.setPauser(deployer.address, await getTxOptions());
+            const tx = await configManager.setPauser(deployer.address, getTxOptions());
             await tx.wait();
             console.log(`  ✓ pauser configured\n`);
         } else {
@@ -381,7 +386,7 @@ async function main() {
         const currentHarvester = await configManager.harvester();
         if (currentHarvester === ethers.constants.AddressZero || currentHarvester.toLowerCase() !== deployer.address.toLowerCase()) {
             console.log(`  Configuring harvester to ${deployer.address}...`);
-            const tx = await configManager.setHarvester(deployer.address, await getTxOptions());
+            const tx = await configManager.setHarvester(deployer.address, getTxOptions());
             await tx.wait();
             console.log(`  ✓ harvester configured\n`);
         } else {
@@ -392,7 +397,7 @@ async function main() {
         const currentAllocator = await configManager.allocator();
         if (currentAllocator === ethers.constants.AddressZero || currentAllocator.toLowerCase() !== deployer.address.toLowerCase()) {
             console.log(`  Configuring allocator to ${deployer.address}...`);
-            const tx = await configManager.setAllocator(deployer.address, await getTxOptions());
+            const tx = await configManager.setAllocator(deployer.address, getTxOptions());
             await tx.wait();
             console.log(`  ✓ allocator configured\n`);
         } else {
@@ -419,7 +424,7 @@ async function main() {
     const currentBufferTargetBps = await dbank.bufferTargetBps();
     if (currentBufferTargetBps.toString() !== BUFFER_TARGET_BPS.toString()) {
         console.log(`  Configuring bufferTargetBps to ${BUFFER_TARGET_BPS} (${BUFFER_TARGET_BPS / 100}%)...`);
-        const tx = await dbank.setBufferTargetBps(BUFFER_TARGET_BPS, await getTxOptions());
+        const tx = await dbank.setBufferTargetBps(BUFFER_TARGET_BPS, getTxOptions());
         await tx.wait();
         console.log(`  ✓ bufferTargetBps configured\n`);
     } else {
@@ -430,7 +435,7 @@ async function main() {
     const currentPerformanceFeeBps = await dbank.performanceFeeBps();
     if (currentPerformanceFeeBps.toString() !== PERFORMANCE_FEE_BPS.toString()) {
         console.log(`  Configuring performanceFeeBps to ${PERFORMANCE_FEE_BPS} (${PERFORMANCE_FEE_BPS / 100}%)...`);
-        const tx = await dbank.setPerformanceFeeBps(PERFORMANCE_FEE_BPS, await getTxOptions());
+        const tx = await dbank.setPerformanceFeeBps(PERFORMANCE_FEE_BPS, getTxOptions());
         await tx.wait();
         console.log(`  ✓ performanceFeeBps configured\n`);
     } else {
@@ -441,7 +446,7 @@ async function main() {
     const currentFeeRecipient = await dbank.feeRecipient();
     if (currentFeeRecipient === ethers.constants.AddressZero || currentFeeRecipient.toLowerCase() !== deployer.address.toLowerCase()) {
         console.log(`  Configuring feeRecipient to ${deployer.address}...`);
-        const tx = await dbank.setFeeRecipient(deployer.address, await getTxOptions());
+        const tx = await dbank.setFeeRecipient(deployer.address, getTxOptions());
         await tx.wait();
         console.log(`  ✓ feeRecipient configured\n`);
     } else {
@@ -452,7 +457,7 @@ async function main() {
     const currentTvlCap = await dbank.tvlCap();
     if (!currentTvlCap.eq(TVL_CAP)) {
         console.log(`  Configuring tvlCap to ${ethers.utils.formatEther(TVL_CAP)} tokens...`);
-        const tx = await dbank.setTvlCap(TVL_CAP, await getTxOptions());
+        const tx = await dbank.setTvlCap(TVL_CAP, getTxOptions());
         await tx.wait();
         console.log(`  ✓ tvlCap configured\n`);
     } else {
@@ -463,7 +468,7 @@ async function main() {
     const currentPerTxCap = await dbank.perTxCap();
     if (!currentPerTxCap.eq(PER_TX_CAP)) {
         console.log(`  Configuring perTxCap to ${ethers.utils.formatEther(PER_TX_CAP)} tokens...`);
-        const tx = await dbank.setPerTxCap(PER_TX_CAP, await getTxOptions());
+        const tx = await dbank.setPerTxCap(PER_TX_CAP, getTxOptions());
         await tx.wait();
         console.log(`  ✓ perTxCap configured\n`);
     } else {
@@ -474,7 +479,7 @@ async function main() {
     const isPaused = await dbank.paused();
     if (isPaused) {
         console.log(`  Unpausing vault...`);
-        const tx = await dbank.pause(false, await getTxOptions());
+        const tx = await dbank.pause(false, getTxOptions());
         await tx.wait();
         console.log(`  ✓ Vault unpaused\n`);
     } else {
@@ -588,7 +593,7 @@ async function main() {
             if (needsUpdate) {
                 console.log(`  Current MockS1 params: APR=${currentAprBps} bps, Cap=${ethers.utils.formatEther(currentCap)} tokens`);
                 console.log(`  Configuring MockS1: APR=${MOCKS1_APR_BPS} bps (${MOCKS1_APR_BPS/100}%), Cap=${ethers.utils.formatEther(MOCKS1_CAP)} tokens...`);
-                const tx = await mockS1.setParams(MOCKS1_APR_BPS, MOCKS1_CAP, await getTxOptions());
+                const tx = await mockS1.setParams(MOCKS1_APR_BPS, MOCKS1_CAP, getTxOptions());
                 await tx.wait();
                 console.log(`  MockS1 params configured successfully\n`);
             } else {
@@ -600,7 +605,7 @@ async function main() {
             // Ensure MockS1 is not paused
             if (currentPaused) {
                 console.log(`  Unpausing MockS1...`);
-                const tx = await mockS1.pause(false, await getTxOptions());
+                const tx = await mockS1.pause(false, getTxOptions());
                 await tx.wait();
                 console.log(`  MockS1 unpaused\n`);
             } else {

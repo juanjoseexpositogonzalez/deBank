@@ -1227,166 +1227,287 @@ describe('dBank', () => {
             const depositAmount = tokens(5000)
             await token.connect(receiver).approve(dbank.address, depositAmount)
             await dbank.connect(receiver).deposit(depositAmount, receiver.address)
-
-            // Transfer tokens to router (simulating the router having liquidity)
-            await token.transfer(strategyRouter.address, tokens(10000))
         })
 
-        it('allows withdrawing unallocated shares when user has allocations', async () => {
-            // User has 5000 USDC deposited (let's say 5000 shares)
-            const userSharesBefore = await dbank.balanceOf(receiver.address)
-            
-            // Allocate 4000 USDC to strategy (via router)
-            const allocationAmount = tokens(4000)
-            await token.connect(receiver).approve(strategyRouter.address, allocationAmount)
-            await strategyRouter.connect(receiver).depositToStrategy(1, allocationAmount)
+        it('maxWithdraw returns unallocated amount after allocation', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(4000))
 
-            // Calculate unallocated shares
-            const userTotalAllocated = await strategyRouter.getUserTotalAllocated(receiver.address)
-            const allocatedSharesBN = await dbank.convertToShares(userTotalAllocated)
-            const unallocatedSharesBN = userSharesBefore.sub(allocatedSharesBN)
-            
-            // Convert unallocated shares to assets
-            const unallocatedAssetsBN = await dbank.convertToAssets(unallocatedSharesBN)
-            
-            // Should be able to withdraw unallocated amount (approximately 1000 USDC)
+            // maxWithdraw = 5000 - 4000 = 1000
+            expect(await dbank.maxWithdraw(receiver.address)).to.equal(tokens(1000))
+        })
+
+        it('withdraw succeeds within unallocated', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(4000))
+
+            await expect(
+                dbank.connect(receiver).withdraw(tokens(1000), receiver.address, receiver.address)
+            ).to.not.be.reverted
+        })
+
+        it('withdraw reverts when exceeding unallocated', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(4000))
+
+            await expect(
+                dbank.connect(receiver).withdraw(tokens(2000), receiver.address, receiver.address)
+            ).to.be.revertedWithCustomError(dbank, 'dBank__CapExceeded')
+        })
+
+        it('withdraw allows partial unallocated amount', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(4000))
+
             const balanceBefore = await token.balanceOf(receiver.address)
-            
-            // Withdraw slightly less than unallocated to account for rounding
-            const withdrawAmount = unallocatedAssetsBN.mul(99).div(100) // 99% to be safe
-            
-            await expect(
-                dbank.connect(receiver).withdraw(withdrawAmount, receiver.address, receiver.address)
-            ).to.not.be.reverted
-
+            await dbank.connect(receiver).withdraw(tokens(500), receiver.address, receiver.address)
             const balanceAfter = await token.balanceOf(receiver.address)
-            expect(balanceAfter.sub(balanceBefore)).to.be.closeTo(withdrawAmount, TOL)
+
+            expect(balanceAfter.sub(balanceBefore)).to.equal(tokens(500))
         })
 
-        it('allows withdraw regardless of strategy allocations (allocations are separate)', async () => {
-            // User has 5000 USDC deposited to dBank
-            const userSharesBefore = await dbank.balanceOf(receiver.address)
-            
-            // Allocate 4000 USDC to strategy FROM WALLET (not from dBank)
-            const allocationAmount = tokens(4000)
-            await token.connect(receiver).approve(strategyRouter.address, allocationAmount)
-            await strategyRouter.connect(receiver).depositToStrategy(1, allocationAmount)
+        it('redeem blocked when exceeding unallocated', async () => {
+            // Need second depositor so buffer > assets, isolating allocation check
+            await token.transfer(user1.address, tokens(10000))
+            await token.connect(user1).approve(dbank.address, tokens(10000))
+            await dbank.connect(user1).deposit(tokens(10000), user1.address)
 
-            // User should still be able to withdraw their full dBank deposit
-            // because strategy allocations come from the wallet, not from dBank
-            // Only limited by buffer liquidity, not by allocations
-            const withdrawAmount = tokens(1000) // Some amount within buffer
-            
+            await dbank.connect(receiver).allocateForUser(1, tokens(4000))
+
+            // Buffer = 11000, but receiver unallocated ≈ 1000
+            // Redeem all 5000 shares → assets ≈ 5000 > unallocated ≈ 1000
             await expect(
-                dbank.connect(receiver).withdraw(withdrawAmount, receiver.address, receiver.address)
+                dbank.connect(receiver).redeem(tokens(5000), receiver.address, receiver.address)
+            ).to.be.revertedWithCustomError(dbank, 'dBank__InsufficientUnallocated')
+        })
+
+        it('redeem succeeds within unallocated', async () => {
+            // Need second depositor so buffer stays above the redeem amount
+            await token.transfer(user1.address, tokens(10000))
+            await token.connect(user1).approve(dbank.address, tokens(10000))
+            await dbank.connect(user1).deposit(tokens(10000), user1.address)
+
+            await dbank.connect(receiver).allocateForUser(1, tokens(4000))
+
+            // Redeem a safe amount (well within unallocated ≈ 1000 and buffer ≈ 11000)
+            await expect(
+                dbank.connect(receiver).redeem(tokens(500), receiver.address, receiver.address)
             ).to.not.be.reverted
         })
 
-        it('allows withdrawing exactly unallocated shares', async () => {
-            // User has 5000 USDC deposited
-            const userSharesBefore = await dbank.balanceOf(receiver.address)
-            
-            // Allocate 4000 USDC to strategy
-            const allocationAmount = tokens(4000)
-            await token.connect(receiver).approve(strategyRouter.address, allocationAmount)
-            await strategyRouter.connect(receiver).depositToStrategy(1, allocationAmount)
+        it('maxRedeem consistent with maxWithdraw', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(4000))
 
-            // Calculate unallocated shares
-            const userTotalAllocated = await strategyRouter.getUserTotalAllocated(receiver.address)
-            const allocatedSharesBN = await dbank.convertToShares(userTotalAllocated)
-            const unallocatedSharesBN = userSharesBefore.sub(allocatedSharesBN)
-            
-            // Convert unallocated shares to assets
-            const unallocatedAssetsBN = await dbank.convertToAssets(unallocatedSharesBN)
-            
-            // Should be able to withdraw exactly unallocated amount
-            const balanceBefore = await token.balanceOf(receiver.address)
-            
-            await expect(
-                dbank.connect(receiver).withdraw(unallocatedAssetsBN, receiver.address, receiver.address)
-            ).to.not.be.reverted
-
-            const balanceAfter = await token.balanceOf(receiver.address)
-            // Use tolerance for comparison due to potential rounding
-            expect(balanceAfter.sub(balanceBefore)).to.be.closeTo(unallocatedAssetsBN, TOL.mul(10))
+            const maxW = await dbank.maxWithdraw(receiver.address)
+            const maxR = await dbank.maxRedeem(receiver.address)
+            const expectedShares = await dbank.convertToShares(maxW)
+            expect(maxR).to.equal(expectedShares)
         })
 
-        it('allows withdrawing less than unallocated shares', async () => {
-            // User has 5000 USDC deposited
-            const userSharesBefore = await dbank.balanceOf(receiver.address)
-            
-            // Allocate 4000 USDC to strategy
-            const allocationAmount = tokens(4000)
-            await token.connect(receiver).approve(strategyRouter.address, allocationAmount)
-            await strategyRouter.connect(receiver).depositToStrategy(1, allocationAmount)
-
-            // Calculate unallocated shares
-            const userTotalAllocated = await strategyRouter.getUserTotalAllocated(receiver.address)
-            const allocatedSharesBN = await dbank.convertToShares(userTotalAllocated)
-            const unallocatedSharesBN = userSharesBefore.sub(allocatedSharesBN)
-            
-            // Convert unallocated shares to assets
-            const unallocatedAssetsBN = await dbank.convertToAssets(unallocatedSharesBN)
-            
-            // Withdraw half of unallocated (e.g., 500 USDC)
-            const withdrawAmount = unallocatedAssetsBN.div(2)
-            
-            const balanceBefore = await token.balanceOf(receiver.address)
-            
-            await expect(
-                dbank.connect(receiver).withdraw(withdrawAmount, receiver.address, receiver.address)
-            ).to.not.be.reverted
-
-            const balanceAfter = await token.balanceOf(receiver.address)
-            expect(balanceAfter.sub(balanceBefore)).to.be.closeTo(withdrawAmount, TOL)
+        it('maxWithdraw = 0 when fully allocated', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(5000))
+            expect(await dbank.maxWithdraw(receiver.address)).to.equal(0)
         })
 
-        it('redeem allows withdrawing unallocated shares', async () => {
-            // User has 5000 USDC deposited
-            const userSharesBefore = await dbank.balanceOf(receiver.address)
-            
-            // Allocate 4000 USDC to strategy
-            const allocationAmount = tokens(4000)
-            await token.connect(receiver).approve(strategyRouter.address, allocationAmount)
-            await strategyRouter.connect(receiver).depositToStrategy(1, allocationAmount)
+        it('unallocating increases maxWithdraw', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(4000))
+            expect(await dbank.maxWithdraw(receiver.address)).to.equal(tokens(1000))
 
-            // Calculate unallocated shares
-            const userTotalAllocated = await strategyRouter.getUserTotalAllocated(receiver.address)
-            const allocatedSharesBN = await dbank.convertToShares(userTotalAllocated)
-            const unallocatedSharesBN = userSharesBefore.sub(allocatedSharesBN)
-            
-            // Should be able to redeem unallocated shares
-            const balanceBefore = await token.balanceOf(receiver.address)
-            
-            // Redeem slightly less than unallocated to account for rounding
-            const redeemShares = unallocatedSharesBN.mul(99).div(100)
-            const expectedAssets = await dbank.convertToAssets(redeemShares)
-            
-            await expect(
-                dbank.connect(receiver).redeem(redeemShares, receiver.address, receiver.address)
-            ).to.not.be.reverted
-
-            const balanceAfter = await token.balanceOf(receiver.address)
-            expect(balanceAfter.sub(balanceBefore)).to.be.closeTo(expectedAssets, TOL.mul(10))
+            await dbank.connect(receiver).unallocateForUser(1, tokens(2000), 100)
+            expect(await dbank.maxWithdraw(receiver.address)).to.equal(tokens(3000))
         })
 
-        it('redeem allows redemption regardless of strategy allocations', async () => {
-            // User has 5000 USDC deposited to dBank
-            const userSharesBefore = await dbank.balanceOf(receiver.address)
-            
-            // Allocate 4000 USDC to strategy FROM WALLET (not from dBank)
-            const allocationAmount = tokens(4000)
-            await token.connect(receiver).approve(strategyRouter.address, allocationAmount)
-            await strategyRouter.connect(receiver).depositToStrategy(1, allocationAmount)
+        it('full unallocate restores full withdrawal', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(5000))
+            expect(await dbank.maxWithdraw(receiver.address)).to.equal(0)
 
-            // User should still be able to redeem their dBank shares
-            // because strategy allocations come from the wallet, not from dBank
-            // Only limited by buffer liquidity
-            const redeemShares = ethers.utils.parseUnits('100', 18) // Some shares within buffer
-            
+            await dbank.connect(receiver).unallocateForUser(1, tokens(5000), 100)
+            expect(await dbank.maxWithdraw(receiver.address)).to.equal(tokens(5000))
+
             await expect(
-                dbank.connect(receiver).redeem(redeemShares, receiver.address, receiver.address)
+                dbank.connect(receiver).withdraw(tokens(5000), receiver.address, receiver.address)
             ).to.not.be.reverted
+        })
+    })
+
+    // ===========================================================
+    // Suite: [VAULT/ALLOCATE_FOR_USER] User Allocation Functions
+    // ===========================================================
+
+    describe('[VAULT/ALLOCATE_FOR_USER] User Allocation Functions', () => {
+        let mockS1
+
+        beforeEach(async () => {
+            await dbank.connect(deployer).setTvlCap(tokens(1000000))
+            await dbank.connect(deployer).setPerTxCap(tokens(100000))
+
+            const MockS1 = await ethers.getContractFactory('MockS1')
+            mockS1 = await MockS1.deploy(token.address)
+            await mockS1.setParams(500, tokens(1000000))
+
+            await strategyRouter.registerStrategy(1, mockS1.address, tokens(100000))
+
+            const depositAmount = tokens(10000)
+            await token.connect(receiver).approve(dbank.address, depositAmount)
+            await dbank.connect(receiver).deposit(depositAmount, receiver.address)
+        })
+
+        it('allocateForUser succeeds and updates tracking', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(5000))
+
+            expect(await dbank.getUserStrategyAllocation(receiver.address, 1)).to.equal(tokens(5000))
+            expect(await dbank.getUserTotalAllocated(receiver.address)).to.equal(tokens(5000))
+            expect(await dbank.getUnallocated(receiver.address)).to.equal(tokens(5000))
+        })
+
+        it('allocateForUser decreases buffer', async () => {
+            const bufferBefore = await dbank.buffer()
+            await dbank.connect(receiver).allocateForUser(1, tokens(5000))
+            const bufferAfter = await dbank.buffer()
+
+            expect(bufferBefore.sub(bufferAfter)).to.equal(tokens(5000))
+        })
+
+        it('allocateForUser emits AllocatedForUser event', async () => {
+            await expect(dbank.connect(receiver).allocateForUser(1, tokens(5000)))
+                .to.emit(dbank, 'AllocatedForUser')
+                .withArgs(receiver.address, 1, tokens(5000), tokens(5000))
+        })
+
+        it('allocateForUser reverts with InsufficientUnallocated when amount > unallocated', async () => {
+            await expect(
+                dbank.connect(receiver).allocateForUser(1, tokens(11000))
+            ).to.be.revertedWithCustomError(dbank, 'dBank__InsufficientUnallocated')
+        })
+
+        it('allocateForUser reverts with InsufficientLiquidity when amount > buffer', async () => {
+            // Owner allocates most of the buffer away
+            await dbank.connect(deployer).allocate(1, tokens(9000))
+            // Buffer = 1000, but user has 10000 unallocated
+
+            await expect(
+                dbank.connect(receiver).allocateForUser(1, tokens(5000))
+            ).to.be.revertedWithCustomError(dbank, 'dBank__InsufficientLiquidity')
+        })
+
+        it('allocateForUser reverts when paused', async () => {
+            await dbank.connect(deployer).pause(true)
+
+            await expect(
+                dbank.connect(receiver).allocateForUser(1, tokens(5000))
+            ).to.be.revertedWithCustomError(dbank, 'dBank__Paused')
+        })
+
+        it('allocateForUser reverts with zero amount', async () => {
+            await expect(
+                dbank.connect(receiver).allocateForUser(1, 0)
+            ).to.be.revertedWithCustomError(dbank, 'dBank__InvalidAmount')
+        })
+
+        it('allocateForUser is atomic (reverts if strategy fails)', async () => {
+            await mockS1.pause(true)
+
+            await expect(
+                dbank.connect(receiver).allocateForUser(1, tokens(5000))
+            ).to.be.reverted
+
+            // State unchanged
+            expect(await dbank.buffer()).to.equal(tokens(10000))
+            expect(await dbank.getUserTotalAllocated(receiver.address)).to.equal(0)
+        })
+
+        it('unallocateForUser succeeds and updates tracking', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(5000))
+            await dbank.connect(receiver).unallocateForUser(1, tokens(3000), 100)
+
+            expect(await dbank.getUserStrategyAllocation(receiver.address, 1)).to.equal(tokens(2000))
+            expect(await dbank.getUserTotalAllocated(receiver.address)).to.equal(tokens(2000))
+            // Tiny yield may accrue between blocks, so use closeTo
+            const unalloc = await dbank.getUnallocated(receiver.address)
+            expect(unalloc).to.be.closeTo(tokens(8000), tokens(1))
+        })
+
+        it('unallocateForUser increases buffer', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(5000))
+            const bufferBefore = await dbank.buffer()
+
+            await dbank.connect(receiver).unallocateForUser(1, tokens(3000), 100)
+            const bufferAfter = await dbank.buffer()
+
+            expect(bufferAfter.sub(bufferBefore)).to.equal(tokens(3000))
+        })
+
+        it('unallocateForUser emits UnallocatedForUser event', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(5000))
+
+            await expect(dbank.connect(receiver).unallocateForUser(1, tokens(3000), 100))
+                .to.emit(dbank, 'UnallocatedForUser')
+                .withArgs(receiver.address, 1, tokens(3000), tokens(8000))
+        })
+
+        it('unallocateForUser reverts when amount exceeds allocation', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(5000))
+
+            await expect(
+                dbank.connect(receiver).unallocateForUser(1, tokens(6000), 100)
+            ).to.be.revertedWithCustomError(dbank, 'dBank__InsufficientUnallocated')
+        })
+
+        it('unallocateForUser reverts with zero amount', async () => {
+            await expect(
+                dbank.connect(receiver).unallocateForUser(1, 0, 100)
+            ).to.be.revertedWithCustomError(dbank, 'dBank__InvalidAmount')
+        })
+
+        it('multiple users have independent allocations', async () => {
+            // user1 deposits and allocates
+            await token.transfer(user1.address, tokens(5000))
+            await token.connect(user1).approve(dbank.address, tokens(5000))
+            await dbank.connect(user1).deposit(tokens(5000), user1.address)
+            await dbank.connect(user1).allocateForUser(1, tokens(3000))
+
+            // receiver allocates
+            await dbank.connect(receiver).allocateForUser(1, tokens(4000))
+
+            expect(await dbank.getUserTotalAllocated(user1.address)).to.equal(tokens(3000))
+            expect(await dbank.getUserTotalAllocated(receiver.address)).to.equal(tokens(4000))
+            // Tiny yield may accrue between blocks, so use closeTo
+            const unalloc1 = await dbank.getUnallocated(user1.address)
+            expect(unalloc1).to.be.closeTo(tokens(2000), tokens(1))
+            const unalloc2 = await dbank.getUnallocated(receiver.address)
+            expect(unalloc2).to.be.closeTo(tokens(6000), tokens(1))
+        })
+
+        it('view functions return correct values', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(7000))
+
+            expect(await dbank.getUserStrategyAllocation(receiver.address, 1)).to.equal(tokens(7000))
+            expect(await dbank.getUserTotalAllocated(receiver.address)).to.equal(tokens(7000))
+            expect(await dbank.getUnallocated(receiver.address)).to.equal(tokens(3000))
+
+            // Non-existent strategy returns 0
+            expect(await dbank.getUserStrategyAllocation(receiver.address, 99)).to.equal(0)
+
+            // User with no allocations
+            expect(await dbank.getUserTotalAllocated(user1.address)).to.equal(0)
+        })
+
+        it('transfer blocked if would leave sender under-collateralized', async () => {
+            await dbank.connect(receiver).allocateForUser(1, tokens(6000))
+
+            // Try to transfer 5000 shares (would leave 5000 assets but 6000 allocated)
+            await expect(
+                dbank.connect(receiver).transfer(user1.address, tokens(5000))
+            ).to.be.revertedWithCustomError(dbank, 'dBank__AllocationTransferRestriction')
+
+            // Transfer 4000 should succeed (leaves 6000 shares >= 6000 allocated)
+            await expect(
+                dbank.connect(receiver).transfer(user1.address, tokens(4000))
+            ).to.not.be.reverted
+        })
+
+        it('totalAssets unchanged after user allocation (buffer -> strategy)', async () => {
+            const totalAssetsBefore = await dbank.totalAssets()
+            await dbank.connect(receiver).allocateForUser(1, tokens(5000))
+            const totalAssetsAfter = await dbank.totalAssets()
+
+            expect(totalAssetsAfter).to.equal(totalAssetsBefore)
         })
     })
 })

@@ -360,8 +360,8 @@ export const loadStrategyRouter = async (provider, chainId, dispatch) => {
 
 // ----------------------------------------------------------
 // LOAD USER STRATEGY ALLOCATIONS
-export const loadUserStrategyAllocations = async (strategyRouter, account, dispatch) => {
-    if (!strategyRouter || !account) {
+export const loadUserStrategyAllocations = async (dBank, account, dispatch, strategyRouter) => {
+    if (!dBank || !account) {
         dispatch(setUserStrategyAllocations([]));
         dispatch(setUserTotalAllocated("0"));
         dispatch(setUserStrategyAllocationsValue([]));
@@ -370,8 +370,8 @@ export const loadUserStrategyAllocations = async (strategyRouter, account, dispa
     }
 
     try {
-        // Get total allocated by user
-        const userTotalAllocatedBN = await strategyRouter.getUserTotalAllocated(account);
+        // Get total allocated by user (now tracked in dBank contract)
+        const userTotalAllocatedBN = await dBank.getUserTotalAllocated(account);
         const userTotalAllocated = ethers.utils.formatUnits(userTotalAllocatedBN, 18);
         dispatch(setUserTotalAllocated(userTotalAllocated));
 
@@ -386,11 +386,13 @@ export const loadUserStrategyAllocations = async (strategyRouter, account, dispa
 
         for (let i = 1; i <= MAX_STRATEGIES; i++) {
             try {
-                // Skip unregistered strategy slots (same as Solidity contract)
+                // Skip unregistered strategy slots (need router for strategy addresses)
+                if (!strategyRouter) break;
                 const strategyAddress = await strategyRouter.strategies(i);
                 if (strategyAddress === ethers.constants.AddressZero) continue;
 
-                const allocationBN = await strategyRouter.getUserStrategyAllocation(account, i);
+                // Read per-user allocation from dBank (not router)
+                const allocationBN = await dBank.getUserStrategyAllocation(account, i);
                 const allocation = ethers.utils.formatUnits(allocationBN, 18);
                 userAllocations.push(allocation);
 
@@ -403,7 +405,7 @@ export const loadUserStrategyAllocations = async (strategyRouter, account, dispa
                             const strategy = new ethers.Contract(
                                 strategyAddress,
                                 ["function totalAssets() view returns (uint256)"],
-                                strategyRouter.provider
+                                dBank.provider
                             );
                             const strategyTotalAssetsBN = await strategy.totalAssets();
                             allocationValueBN = allocationBN.mul(strategyTotalAssetsBN).div(strategyAllocatedBN);
@@ -423,7 +425,7 @@ export const loadUserStrategyAllocations = async (strategyRouter, account, dispa
                 console.warn(`Error reading strategy ${i} allocation:`, error.message);
             }
         }
-        
+
         dispatch(setUserStrategyAllocations(userAllocations));
         dispatch(setUserStrategyAllocationsValue(userAllocationsValue));
         dispatch(setUserTotalAllocatedValue(ethers.utils.formatUnits(userTotalAllocatedValueBN, 18)));
@@ -1042,254 +1044,48 @@ const parseWithdrawError = (error) => {
 }
 
 // ----------------------------------------------------------
-// ALLOCATE TO STRATEGY (StrategyRouter.depositToStrategy)
-// Flow: ALL pre-checks → vault withdrawal → strategy deposit (with auto-redeposit on failure)
+// ALLOCATE TO STRATEGY (dBank.allocateForUser — atomic, single tx)
+// dBank handles: buffer check, unallocated check, strategy deposit, allocation tracking
 export const allocateToStrategy = async (provider, strategyRouter, tokens, account, amount, strategyId, dispatch, dBank) => {
     try {
-        const signer = provider.getSigner();
-        const amountInWei = ethers.utils.parseUnits(amount, 18);
-
-        console.log('allocateToStrategy - Starting allocation:', {
-            account,
-            amount,
-            amountInWei: amountInWei.toString(),
-            strategyId,
-            routerAddress: strategyRouter.address
-        });
-
-        const tokenWithSigner = tokens[0].connect(signer);
-        const routerWithSigner = strategyRouter.connect(signer);
-
-        // ============================================================
-        // PHASE 1: ALL PRE-CHECKS (read-only, no state changes)
-        // All validation happens BEFORE any vault withdrawal to prevent
-        // the non-atomic failure scenario where shares are burned but
-        // strategy deposit fails.
-        // ============================================================
-
-        // 1a. Check user has vault shares
         if (!dBank) {
             return { ok: false, hash: null, error: 'Vault contract not available.' };
         }
 
-        const userShares = await dBank.balanceOf(account);
-        console.log('allocateToStrategy - User shares in dBank:', ethers.utils.formatUnits(userShares, 18));
-
-        if (userShares.lte(0)) {
-            return { ok: false, hash: null, error: 'No vault shares to allocate from. Please deposit to the vault first.' };
-        }
-
-        // 1b. Check maxWithdraw from vault (capped by buffer, perTxCap, user assets)
-        const maxWithdrawBN = await dBank.maxWithdraw(account);
-        console.log('allocateToStrategy - Max withdrawable from vault:', ethers.utils.formatUnits(maxWithdrawBN, 18));
-
-        if (amountInWei.gt(maxWithdrawBN)) {
-            const errorMsg = `Cannot allocate ${amount}. Max available from vault: ${ethers.utils.formatUnits(maxWithdrawBN, 18)} (limited by vault buffer).`;
-            console.error('allocateToStrategy -', errorMsg);
-            return { ok: false, hash: null, error: errorMsg };
-        }
-
-        // 1c. Check strategy exists, is active, and has router-level capacity
-        let strategyInfo;
-        try {
-            strategyInfo = await strategyRouter.getStrategy(strategyId);
-            console.log('allocateToStrategy - Strategy info:', {
-                strategy: strategyInfo.strategy,
-                active: strategyInfo.active,
-                cap: ethers.utils.formatUnits(strategyInfo.cap, 18),
-                allocated: ethers.utils.formatUnits(strategyInfo.allocated, 18)
-            });
-
-            if (!strategyInfo.active) {
-                return { ok: false, hash: null, error: `Strategy ${strategyId} is not active` };
-            }
-
-            const available = strategyInfo.cap.sub(strategyInfo.allocated);
-            console.log('allocateToStrategy - Router available capacity:', ethers.utils.formatUnits(available, 18));
-            if (amountInWei.gt(available)) {
-                return { ok: false, hash: null, error: `Cap exceeded. Available: ${ethers.utils.formatUnits(available, 18)}, Requested: ${amount}` };
-            }
-        } catch (strategyError) {
-            console.error('allocateToStrategy - Strategy check failed:', strategyError);
-            return { ok: false, hash: null, error: `Strategy check failed: ${strategyError.message}` };
-        }
-
-        // 1d. Check strategy's INTERNAL cap (e.g., MockS1 has its own cap separate from router)
-        try {
-            const strategyAddress = strategyInfo.strategy;
-            const mockStrategy = new ethers.Contract(
-                strategyAddress,
-                [
-                    "function cap() view returns (uint256)",
-                    "function principal() view returns (uint256)",
-                    "function paused() view returns (bool)"
-                ],
-                provider
-            );
-
-            const [strategyCap, strategyPrincipal, strategyPaused] = await Promise.all([
-                mockStrategy.cap(),
-                mockStrategy.principal(),
-                mockStrategy.paused()
-            ]);
-
-            console.log('allocateToStrategy - Strategy internal state:', {
-                cap: ethers.utils.formatUnits(strategyCap, 18),
-                principal: ethers.utils.formatUnits(strategyPrincipal, 18),
-                paused: strategyPaused
-            });
-
-            if (strategyPaused) {
-                return { ok: false, hash: null, error: 'Strategy is paused. Cannot allocate.' };
-            }
-
-            if (strategyCap.gt(0)) {
-                const internalAvailable = strategyCap.sub(strategyPrincipal);
-                if (amountInWei.gt(internalAvailable)) {
-                    return { ok: false, hash: null, error: `Strategy internal cap exceeded. Available: ${ethers.utils.formatUnits(internalAvailable, 18)}, Requested: ${amount}. Cap: ${ethers.utils.formatUnits(strategyCap, 18)}, Principal: ${ethers.utils.formatUnits(strategyPrincipal, 18)}` };
-                }
-            }
-        } catch (capCheckError) {
-            // Non-fatal: strategy may not implement cap()/principal() (future strategy types)
-            console.warn('allocateToStrategy - Could not verify strategy internal cap (non-fatal):', capCheckError.message);
-        }
-
-        // ============================================================
-        // PHASE 2: STATE-CHANGING TRANSACTIONS
-        // Vault withdrawal → strategy deposit (with auto-redeposit safety net)
-        // ============================================================
-
-        // 2a. Withdraw from vault (burns shares, reduces buffer, sends USDC to wallet)
+        const signer = provider.getSigner();
+        const amountInWei = ethers.utils.parseUnits(amount, 18);
         const dBankWithSigner = dBank.connect(signer);
-        let vaultWithdrawCompleted = false;
 
-        try {
-            console.log('allocateToStrategy - Withdrawing from vault:', ethers.utils.formatUnits(amountInWei, 18));
-            const withdrawTx = await dBankWithSigner.withdraw(amountInWei, account, account);
-            console.log('allocateToStrategy - Vault withdraw tx:', withdrawTx.hash);
-            await withdrawTx.wait();
-            vaultWithdrawCompleted = true;
-            console.log('allocateToStrategy - Vault withdraw confirmed');
+        const tx = await dBankWithSigner.allocateForUser(strategyId, amountInWei);
+        await tx.wait();
 
-            const userBalance = await tokens[0].balanceOf(account);
-            console.log('allocateToStrategy - Balance after vault withdraw:', ethers.utils.formatUnits(userBalance, 18));
-        } catch (withdrawError) {
-            console.error('allocateToStrategy - Vault withdrawal failed:', withdrawError);
-            return { ok: false, hash: null, error: `Vault withdrawal failed: ${withdrawError.message}` };
-        }
+        // Refresh state
+        const { chainId } = await provider.getNetwork();
+        await loadStrategyRouter(provider, chainId, dispatch);
+        await loadUserStrategyAllocations(dBank, account, dispatch, strategyRouter);
+        await loadBalances(dBank, tokens, account, dispatch);
 
-        // 2b. Approve router + deposit to strategy (with auto-redeposit on failure)
-        try {
-            // Check and set allowance to router
-            const currentAllowance = await tokens[0].allowance(account, strategyRouter.address);
-            console.log('allocateToStrategy - Current allowance:', ethers.utils.formatUnits(currentAllowance, 18));
-
-            if (currentAllowance.lt(amountInWei)) {
-                console.log('allocateToStrategy - Approving tokens...');
-                const approveTx = await tokenWithSigner.approve(strategyRouter.address, amountInWei);
-                console.log('allocateToStrategy - Approval tx hash:', approveTx.hash);
-                await approveTx.wait();
-                console.log('allocateToStrategy - Approval confirmed');
-            }
-
-            // Deposit to strategy
-            console.log('allocateToStrategy - Calling depositToStrategy...');
-            const tx = await routerWithSigner.depositToStrategy(strategyId, amountInWei);
-            console.log('allocateToStrategy - Transaction sent:', tx.hash);
-            await tx.wait();
-            console.log('allocateToStrategy - Transaction confirmed');
-
-            // Success: refresh strategy state
-            await loadStrategyRouter(provider, (await provider.getNetwork()).chainId, dispatch);
-            await loadUserStrategyAllocations(strategyRouter, account, dispatch);
-
-            return { ok: true, hash: tx.hash };
-
-        } catch (strategyDepositError) {
-            // Strategy deposit FAILED after vault withdrawal committed.
-            // Auto-redeposit back to vault to restore user's position.
-            console.error('allocateToStrategy - Strategy deposit FAILED after vault withdrawal:', strategyDepositError);
-
-            if (vaultWithdrawCompleted) {
-                console.log('allocateToStrategy - Attempting auto-redeposit back to vault...');
-                try {
-                    const currentBalance = await tokens[0].balanceOf(account);
-                    const reDepositAmount = currentBalance.lt(amountInWei) ? currentBalance : amountInWei;
-
-                    if (reDepositAmount.gt(0)) {
-                        // Approve dBank to pull the tokens back
-                        const currentVaultAllowance = await tokens[0].allowance(account, dBank.address);
-                        if (currentVaultAllowance.lt(reDepositAmount)) {
-                            const approveVaultTx = await tokenWithSigner.approve(dBank.address, reDepositAmount);
-                            await approveVaultTx.wait();
-                        }
-
-                        // Redeposit to vault
-                        const redepositTx = await dBankWithSigner.deposit(reDepositAmount, account);
-                        await redepositTx.wait();
-                        console.log('allocateToStrategy - Auto-redeposit successful:', redepositTx.hash);
-
-                        // Refresh all state after redeposit
-                        await loadBalances(dBank, tokens, account, dispatch);
-                        await loadStrategyRouter(provider, (await provider.getNetwork()).chainId, dispatch);
-                        await loadUserStrategyAllocations(strategyRouter, account, dispatch);
-
-                        return {
-                            ok: false,
-                            hash: null,
-                            error: `Strategy deposit failed. Your funds (${ethers.utils.formatUnits(reDepositAmount, 18)} USDC) have been automatically redeposited to the vault. Error: ${strategyDepositError.message}`
-                        };
-                    }
-                } catch (reDepositError) {
-                    console.error('allocateToStrategy - AUTO-REDEPOSIT FAILED:', reDepositError);
-
-                    // Refresh state to show current (degraded) state
-                    try {
-                        await loadBalances(dBank, tokens, account, dispatch);
-                    } catch { /* best effort */ }
-
-                    return {
-                        ok: false,
-                        hash: null,
-                        error: `CRITICAL: Strategy deposit failed AND auto-redeposit failed. Your ${amount} USDC is in your wallet. Please manually deposit back to the vault. Strategy error: ${strategyDepositError.message}. Redeposit error: ${reDepositError.message}`
-                    };
-                }
-            }
-
-            // Fallback: vault withdrawal did not complete, just return the error
-            return { ok: false, hash: null, error: `Strategy deposit failed: ${strategyDepositError.message}` };
-        }
+        return { ok: true, hash: tx.hash };
     } catch (error) {
         console.error("allocateToStrategy error:", error);
 
-        let errorMessage = error.message;
-        if (error.reason) {
-            errorMessage = error.reason;
-        } else if (error.data && error.data.message) {
-            errorMessage = error.data.message;
-        } else if (error.error && error.error.message) {
-            errorMessage = error.error.message;
-        }
+        let errorMessage = error.reason || error.message || 'Unknown error';
+        if (error.data && error.data.message) errorMessage = error.data.message;
+        if (error.error && error.error.message) errorMessage = error.error.message;
 
-        if (errorMessage.includes('execution reverted')) {
-            if (errorMessage.includes('StrategyRouter__CapExceeded')) {
-                try {
-                    const info = await strategyRouter.getStrategy(strategyId);
-                    errorMessage = `Strategy cap exceeded. Cap: ${ethers.utils.formatUnits(info.cap, 18)}, Allocated: ${ethers.utils.formatUnits(info.allocated, 18)}, Available: ${ethers.utils.formatUnits(info.cap.sub(info.allocated), 18)}.`;
-                } catch {
-                    errorMessage = 'Cap exceeded for this strategy. Please reduce the amount.';
-                }
-            } else if (errorMessage.includes('StrategyRouter__StrategyPaused')) {
-                errorMessage = 'This strategy is currently paused.';
-            } else if (errorMessage.includes('StrategyRouter__StrategyNotActive')) {
-                errorMessage = 'This strategy is not active.';
-            } else if (errorMessage.includes('Transfer failed')) {
-                errorMessage = 'Token transfer failed. Please check your balance and allowance.';
-            } else if (errorMessage.includes('Strategy deposit failed')) {
-                errorMessage = 'Strategy deposit failed. The strategy may have rejected the deposit.';
-            } else {
-                errorMessage = `Transaction failed: ${errorMessage}. Please check your balance, allowance, and strategy status.`;
-            }
+        // Parse common revert reasons
+        if (errorMessage.includes('dBank__InsufficientUnallocated')) {
+            errorMessage = 'Insufficient unallocated balance. You cannot allocate more than your unallocated vault position.';
+        } else if (errorMessage.includes('dBank__InsufficientLiquidity')) {
+            errorMessage = 'Insufficient vault liquidity (buffer too low). Try a smaller amount.';
+        } else if (errorMessage.includes('dBank__InvalidAmount')) {
+            errorMessage = 'Amount must be greater than zero.';
+        } else if (errorMessage.includes('StrategyRouter__CapExceeded')) {
+            errorMessage = 'Strategy cap exceeded. Please reduce the amount.';
+        } else if (errorMessage.includes('StrategyRouter__StrategyPaused')) {
+            errorMessage = 'This strategy is currently paused.';
+        } else if (errorMessage.includes('user rejected') || errorMessage.includes('User denied')) {
+            errorMessage = 'Transaction was rejected by the user.';
         }
 
         return { ok: false, hash: null, error: errorMessage };
@@ -1297,45 +1093,38 @@ export const allocateToStrategy = async (provider, strategyRouter, tokens, accou
 }
 
 // ----------------------------------------------------------
-// UN-ALLOCATE FROM STRATEGY (StrategyRouter.withdrawFromStrategy)
-export const unallocateFromStrategy = async (provider, strategyRouter, tokens, account, amount, strategyId, dispatch, maxSlippageBps = 50) => {
+// UN-ALLOCATE FROM STRATEGY (dBank.unallocateForUser — atomic, single tx)
+// dBank handles: allocation tracking, strategy withdrawal, buffer update
+export const unallocateFromStrategy = async (provider, strategyRouter, tokens, account, amount, strategyId, dispatch, maxSlippageBps = 50, dBank) => {
     try {
+        if (!dBank) {
+            return { ok: false, hash: null, error: 'Vault contract not available.' };
+        }
+
         const signer = provider.getSigner();
         const amountInWei = ethers.utils.parseUnits(amount, 18);
+        const dBankWithSigner = dBank.connect(signer);
 
-        if (amountInWei.isZero()) {
-            return { ok: false, hash: null, error: 'Amount must be greater than zero.' };
-        }
-
-        const routerWithSigner = strategyRouter.connect(signer);
-
-        const tx = await routerWithSigner.withdrawFromStrategy(strategyId, amountInWei, maxSlippageBps);
+        const tx = await dBankWithSigner.unallocateForUser(strategyId, amountInWei, maxSlippageBps);
         await tx.wait();
 
-        await loadStrategyRouter(provider, (await provider.getNetwork()).chainId, dispatch);
-
-        // Reload user allocations
-        await loadUserStrategyAllocations(strategyRouter, account, dispatch);
-
-        // Reload token balance (user gets tokens back in wallet)
-        if (tokens && tokens.length > 0 && account) {
-            const updatedBalance = await tokens[0].balanceOf(account);
-            dispatch(balancesLoaded([ethers.utils.formatUnits(updatedBalance, 18)]));
-        }
+        // Refresh state
+        const { chainId } = await provider.getNetwork();
+        await loadStrategyRouter(provider, chainId, dispatch);
+        await loadUserStrategyAllocations(dBank, account, dispatch, strategyRouter);
+        await loadBalances(dBank, tokens, account, dispatch);
 
         return { ok: true, hash: tx.hash };
     } catch (error) {
         console.error("unallocateFromStrategy error:", error);
 
-        let errorMessage = error.message || 'Unknown error';
-        if (error.reason) {
-            errorMessage = error.reason;
-        }
+        let errorMessage = error.reason || error.message || 'Unknown error';
+
         // Parse common revert reasons
-        if (errorMessage.includes('StrategyRouter__InsufficientBalance')) {
-            errorMessage = 'Insufficient balance in strategy. The strategy may not have enough liquidity.';
-        } else if (errorMessage.includes('Transfer failed')) {
-            errorMessage = 'Token transfer failed. The router may not have enough liquidity to return your tokens.';
+        if (errorMessage.includes('dBank__InsufficientUnallocated')) {
+            errorMessage = 'Insufficient allocation. You cannot un-allocate more than you have allocated.';
+        } else if (errorMessage.includes('dBank__InvalidAmount')) {
+            errorMessage = 'Amount must be greater than zero.';
         } else if (errorMessage.includes('user rejected') || errorMessage.includes('User denied')) {
             errorMessage = 'Transaction was rejected by the user.';
         }
@@ -1407,7 +1196,7 @@ export const loadChartData = async (provider, dBank, strategyRouter, account, di
                 // Iterate through strategies to get user allocations
                 for (let i = 1; i <= totalStrategies; i++) {
                     try {
-                        const allocationBN = await strategyRouter.getUserStrategyAllocation(account, i);
+                        const allocationBN = await dBank.getUserStrategyAllocation(account, i);
                         if (allocationBN.gt(0)) {
                             const allocationPrincipal = parseFloat(ethers.utils.formatUnits(allocationBN, 18));
 

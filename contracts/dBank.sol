@@ -35,6 +35,8 @@ contract dBank {
     error dBank__InsufficientAllowance();
     error dBank__InvalidStrategy();
     error dBank__AllocationFailed();
+    error dBank__InsufficientUnallocated(uint256 requested, uint256 unallocated);
+    error dBank__AllocationTransferRestriction(uint256 remainingAssets, uint256 allocated);
     // State Variables
     Token public immutable asset;
     address public owner;
@@ -67,6 +69,10 @@ contract dBank {
 
     // pause and safety
     bool public paused;
+
+    // Per-user allocation tracking
+    mapping(address => mapping(uint256 => uint256)) public userStrategyAllocation;
+    mapping(address => uint256) public userTotalAllocated;
 
     // Events - ERC-4626 required events
     event Deposit(
@@ -104,6 +110,8 @@ contract dBank {
     event Paused(bool paused);
     event Allocated(uint256 indexed strategyId, uint256 amount, uint256 newBuffer);
     event WithdrawnFromStrategy(uint256 indexed strategyId, uint256 amount);
+    event AllocatedForUser(address indexed user, uint256 indexed strategyId, uint256 amount, uint256 newBuffer);
+    event UnallocatedForUser(address indexed user, uint256 indexed strategyId, uint256 amount, uint256 newBuffer);
 
     // modifiers
     modifier onlyOwner() {
@@ -189,9 +197,10 @@ contract dBank {
 
     function maxWithdraw(address _owner) external view returns (uint256) {
         uint256 ownerAssets = this.convertToAssets(balanceOf[_owner]);
+        uint256 allocated = userTotalAllocated[_owner];
+        uint256 unallocated = ownerAssets > allocated ? ownerAssets - allocated : 0;
 
-        // Cap to buffer (unallocated capital) — users cannot pull from strategies
-        uint256 maxAmount = ownerAssets;
+        uint256 maxAmount = unallocated;
         if (maxAmount > buffer) {
             maxAmount = buffer;
         }
@@ -202,20 +211,8 @@ contract dBank {
     }
 
     function maxRedeem(address _owner) external view returns (uint256) {
-        uint256 ownerShares = balanceOf[_owner];
-
-        // Cap to buffer (unallocated capital) — users cannot pull from strategies
-        uint256 bufferShares = this.convertToShares(buffer);
-        if (ownerShares > bufferShares) {
-            ownerShares = bufferShares;
-        }
-        if (perTxCap > 0) {
-            uint256 capShares = this.convertToShares(perTxCap);
-            if (ownerShares > capShares) {
-                return capShares;
-            }
-        }
-        return ownerShares;
+        uint256 maxAssets = this.maxWithdraw(_owner);
+        return this.convertToShares(maxAssets);
     }
 
     // Preview functions
@@ -313,6 +310,13 @@ contract dBank {
         assets = this.convertToAssets(_shares);
         // 2.5. Verify assets <= buffer (users cannot pull from strategies)
         if (assets > buffer) revert dBank__InsufficientLiquidity(assets, buffer);
+        // 2.6. Check allocation-aware limit
+        {
+            uint256 allocated = userTotalAllocated[_owner];
+            uint256 ownerAssets = this.convertToAssets(balanceOf[_owner]);
+            uint256 unallocated = ownerAssets > allocated ? ownerAssets - allocated : 0;
+            if (assets > unallocated) revert dBank__InsufficientUnallocated(assets, unallocated);
+        }
         // 3. Handle approval if owner != msg.sender
         if (_owner != msg.sender) {
             if (allowance[_owner][msg.sender] < _shares) revert dBank__InsufficientAllowance();
@@ -371,6 +375,15 @@ contract dBank {
     function _transfer(address _from, address _to, uint256 _amount) internal {
         if (_to == address(0)) revert dBank__ZeroAddress();
         if (balanceOf[_from] < _amount) revert dBank__InsufficientShares();
+
+        // Check that post-transfer assets still cover allocations
+        uint256 remainingShares = balanceOf[_from] - _amount;
+        uint256 remainingAssets = this.convertToAssets(remainingShares);
+        uint256 allocated = userTotalAllocated[_from];
+        if (remainingAssets < allocated) {
+            revert dBank__AllocationTransferRestriction(remainingAssets, allocated);
+        }
+
         balanceOf[_from] -= _amount;
         balanceOf[_to] += _amount;
 
@@ -522,6 +535,109 @@ contract dBank {
         emit BufferUpdated(oldBuffer, buffer);
 
         return allocated;
+    }
+
+    /**
+     * @notice Allocate assets from buffer to a strategy on behalf of a user
+     * @dev Atomic: if strategy deposit fails, all state changes revert
+     * @param _strategyId The strategy ID to allocate to
+     * @param _amount The amount of assets to allocate
+     * @return The amount actually allocated
+     */
+    function allocateForUser(uint256 _strategyId, uint256 _amount) external whenNotPaused returns (uint256) {
+        if (_amount == 0) revert dBank__InvalidAmount();
+
+        // Check unallocated >= amount
+        uint256 ownerAssets = this.convertToAssets(balanceOf[msg.sender]);
+        uint256 allocated = userTotalAllocated[msg.sender];
+        uint256 unallocated = ownerAssets > allocated ? ownerAssets - allocated : 0;
+        if (_amount > unallocated) revert dBank__InsufficientUnallocated(_amount, unallocated);
+
+        // Check buffer has enough
+        if (_amount > buffer) revert dBank__InsufficientLiquidity(_amount, buffer);
+
+        // Effects: update tracking BEFORE external calls (CEI)
+        userStrategyAllocation[msg.sender][_strategyId] += _amount;
+        userTotalAllocated[msg.sender] += _amount;
+        uint256 oldBuffer = buffer;
+        buffer -= _amount;
+
+        // Interactions: approve router and deposit
+        asset.approve(strategyRouter, _amount);
+        uint256 deposited = StrategyRouter(strategyRouter).depositToStrategy(_strategyId, _amount);
+
+        emit AllocatedForUser(msg.sender, _strategyId, deposited, buffer);
+        emit BufferUpdated(oldBuffer, buffer);
+
+        return deposited;
+    }
+
+    /**
+     * @notice Unallocate assets from a strategy back to buffer on behalf of a user
+     * @dev Allows withdrawing up to the current value (principal + yield).
+     *      Tracking is reduced by min(_amount, tracked principal).
+     * @param _strategyId The strategy ID to unallocate from
+     * @param _amount The amount of assets to unallocate (can include yield)
+     * @param _maxSlippageBps Maximum slippage in basis points
+     * @return The amount actually withdrawn
+     */
+    function unallocateForUser(uint256 _strategyId, uint256 _amount, uint256 _maxSlippageBps) external whenNotPaused returns (uint256) {
+        if (_amount == 0) revert dBank__InvalidAmount();
+
+        uint256 userAlloc = userStrategyAllocation[msg.sender][_strategyId];
+        if (userAlloc == 0) revert dBank__InsufficientUnallocated(_amount, 0);
+
+        // Compute user's current value including yield
+        StrategyRouter router = StrategyRouter(strategyRouter);
+        uint256 routerAllocated = router.strategyAllocated(_strategyId);
+        uint256 userValue;
+        if (routerAllocated > 0) {
+            address strategyAddr = router.strategies(_strategyId);
+            (bool success, bytes memory data) = strategyAddr.staticcall(
+                abi.encodeWithSignature("totalAssets()")
+            );
+            require(success, "Strategy totalAssets call failed");
+            uint256 strategyTotalAssets = abi.decode(data, (uint256));
+            userValue = userAlloc * strategyTotalAssets / routerAllocated;
+        } else {
+            userValue = userAlloc;
+        }
+
+        if (_amount > userValue) revert dBank__InsufficientUnallocated(_amount, userValue);
+
+        // Effects: reduce tracking by min(_amount, principal)
+        // If withdrawing yield beyond principal, clear all tracking
+        uint256 principalToReduce = _amount >= userAlloc ? userAlloc : _amount;
+        userStrategyAllocation[msg.sender][_strategyId] -= principalToReduce;
+        userTotalAllocated[msg.sender] -= principalToReduce;
+
+        // Interactions: withdraw from strategy via router (tokens come back to dBank)
+        uint256 withdrawn = router.withdrawFromStrategy(_strategyId, _amount, _maxSlippageBps);
+
+        // Update buffer with returned tokens
+        uint256 oldBuffer = buffer;
+        buffer += withdrawn;
+
+        emit UnallocatedForUser(msg.sender, _strategyId, withdrawn, buffer);
+        emit BufferUpdated(oldBuffer, buffer);
+
+        return withdrawn;
+    }
+
+    // View functions for per-user allocation tracking
+
+    function getUserStrategyAllocation(address _user, uint256 _strategyId) external view returns (uint256) {
+        return userStrategyAllocation[_user][_strategyId];
+    }
+
+    function getUserTotalAllocated(address _user) external view returns (uint256) {
+        return userTotalAllocated[_user];
+    }
+
+    function getUnallocated(address _user) external view returns (uint256) {
+        uint256 ownerAssets = this.convertToAssets(balanceOf[_user]);
+        uint256 allocated = userTotalAllocated[_user];
+        return ownerAssets > allocated ? ownerAssets - allocated : 0;
     }
 
     /**
