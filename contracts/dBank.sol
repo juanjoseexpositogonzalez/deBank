@@ -156,47 +156,34 @@ contract dBank {
         paused = false;
     }
 
-    // view functions
-    function totalAssets() external view returns (uint256) {
+    //===========================================================
+    // Internal View Helpers (no external self-calls)
+    //===========================================================
+
+    function _totalAssets() internal view returns (uint256) {
         return buffer + StrategyRouter(strategyRouter).userTotalAssets(address(this));
     }
 
-    // conversion functions
-    function convertToShares(uint256 _assets) external view returns (uint256 shares) {
-        uint256 _totalAssets = this.totalAssets();
-        if (totalSupply == 0) {
-            shares = _assets;
-        } else {
-            shares = _assets * totalSupply / _totalAssets;
-        }
-        return shares; // Math.floor is implicit in Solidity division
+    function _convertToShares(uint256 _assets) internal view returns (uint256) {
+        uint256 ta = _totalAssets();
+        if (totalSupply == 0) return _assets;
+        return _assets * totalSupply / ta;
     }
 
-    function convertToAssets(uint256 _shares) external view returns (uint256 assets) {
-        if (totalSupply == 0) {
-            assets = _shares; // 1:1 ratio when no shares exist (matches convertToShares)
-        } else {
-            assets = _shares * this.totalAssets() / totalSupply;
-        }
-        return assets; // Math.floor is implicit in Solidity division
+    function _convertToAssets(uint256 _shares) internal view returns (uint256) {
+        if (totalSupply == 0) return _shares;
+        return _shares * _totalAssets() / totalSupply;
     }
 
-    // Max functions
-    function maxDeposit(address /* _receiver */) external view returns (uint256) {
-        uint256 _totalAssets = this.totalAssets();
-        uint256 maxAssets = _totalAssets >= tvlCap ? 0 : tvlCap - _totalAssets;
-        if (maxAssets < perTxCap) {
-            return maxAssets;
-        }
+    function _maxDeposit(address /* _receiver */) internal view returns (uint256) {
+        uint256 ta = _totalAssets();
+        uint256 maxAssets = ta >= tvlCap ? 0 : tvlCap - ta;
+        if (maxAssets < perTxCap) return maxAssets;
         return perTxCap;
     }
 
-    function maxMint(address _receiver) external view returns (uint256) {
-        return this.convertToShares(this.maxDeposit(_receiver));
-    }
-
-    function maxWithdraw(address _owner) external view returns (uint256) {
-        uint256 ownerAssets = this.convertToAssets(balanceOf[_owner]);
+    function _maxWithdraw(address _owner) internal view returns (uint256) {
+        uint256 ownerAssets = _convertToAssets(balanceOf[_owner]);
         uint256 allocated = userTotalAllocated[_owner];
         uint256 unallocated = ownerAssets > allocated ? ownerAssets - allocated : 0;
 
@@ -210,26 +197,53 @@ contract dBank {
         return maxAmount;
     }
 
+    //===========================================================
+    // External View Functions (thin wrappers)
+    //===========================================================
+
+    function totalAssets() external view returns (uint256) {
+        return _totalAssets();
+    }
+
+    function convertToShares(uint256 _assets) external view returns (uint256) {
+        return _convertToShares(_assets);
+    }
+
+    function convertToAssets(uint256 _shares) external view returns (uint256) {
+        return _convertToAssets(_shares);
+    }
+
+    function maxDeposit(address _receiver) external view returns (uint256) {
+        return _maxDeposit(_receiver);
+    }
+
+    function maxMint(address _receiver) external view returns (uint256) {
+        return _convertToShares(_maxDeposit(_receiver));
+    }
+
+    function maxWithdraw(address _owner) external view returns (uint256) {
+        return _maxWithdraw(_owner);
+    }
+
     function maxRedeem(address _owner) external view returns (uint256) {
-        uint256 maxAssets = this.maxWithdraw(_owner);
-        return this.convertToShares(maxAssets);
+        return _convertToShares(_maxWithdraw(_owner));
     }
 
     // Preview functions
-    function previewDeposit(uint256 _assets) external view returns (uint256 shares) {
-        return this.convertToShares(_assets);
+    function previewDeposit(uint256 _assets) external view returns (uint256) {
+        return _convertToShares(_assets);
     }
 
-    function previewMint(uint256 _shares) external view returns (uint256 assets) {
-        return this.convertToAssets(_shares);
+    function previewMint(uint256 _shares) external view returns (uint256) {
+        return _convertToAssets(_shares);
     }
 
-    function previewWithdraw(uint256 _assets) external view returns (uint256 shares) {
-        return this.convertToShares(_assets);
+    function previewWithdraw(uint256 _assets) external view returns (uint256) {
+        return _convertToShares(_assets);
     }
 
-    function previewRedeem(uint256 _shares) external view returns (uint256 assets) {
-        return this.convertToAssets(_shares);
+    function previewRedeem(uint256 _shares) external view returns (uint256) {
+        return _convertToAssets(_shares);
     }
 
     //===========================================================
@@ -242,9 +256,10 @@ contract dBank {
         // 2. Verify receiver
         if (_receiver == address(0)) revert dBank__InvalidReceiver();
         // 3. Convert to shares
-        shares = this.convertToShares(_assets);
+        shares = _convertToShares(_assets);
         // 4. Verify max deposit
-        if (_assets > this.maxDeposit(_receiver)) revert dBank__CapExceeded(_assets, this.maxDeposit(_receiver));
+        uint256 maxD = _maxDeposit(_receiver);
+        if (_assets > maxD) revert dBank__CapExceeded(_assets, maxD);
         // 5. Update buffer
         buffer += _assets;
         // 6. Transfer assets from sender to contract
@@ -263,9 +278,10 @@ contract dBank {
         // 2. Verify receiver
         if (_receiver == address(0)) revert dBank__InvalidReceiver();
         // 3. Convert to assets
-        assets = this.convertToAssets(_shares);
+        assets = _convertToAssets(_shares);
         // 4. Verify max deposit
-        if (assets > this.maxDeposit(_receiver)) revert dBank__CapExceeded(assets, this.maxDeposit(_receiver));
+        uint256 maxD = _maxDeposit(_receiver);
+        if (assets > maxD) revert dBank__CapExceeded(assets, maxD);
         // 5. Transfer assets from sender to contract
         asset.transferFrom(msg.sender, address(this), assets);
         // 6. Update buffer
@@ -282,9 +298,10 @@ contract dBank {
         // 1. Verify assets
         if (_assets == 0) revert dBank__InvalidAmount();
         // 2. Verify assets <= maxWithdraw(owner) — enforces buffer, perTxCap, and ownerAssets caps
-        if (_assets > this.maxWithdraw(_owner)) revert dBank__CapExceeded(_assets, this.maxWithdraw(_owner));
+        uint256 maxW = _maxWithdraw(_owner);
+        if (_assets > maxW) revert dBank__CapExceeded(_assets, maxW);
         // 3. Convert to shares
-        shares = this.convertToShares(_assets);
+        shares = _convertToShares(_assets);
         // 4. Verify shares <= balanceOf[owner]
         if (shares > balanceOf[_owner]) revert dBank__InsufficientShares();
         // 4.5. Handle approval if owner != msg.sender
@@ -307,13 +324,13 @@ contract dBank {
         // 1. Verify shares
         if (_shares == 0) revert dBank__InvalidAmount();
         // 2. Calculate assets
-        assets = this.convertToAssets(_shares);
+        assets = _convertToAssets(_shares);
         // 2.5. Verify assets <= buffer (users cannot pull from strategies)
         if (assets > buffer) revert dBank__InsufficientLiquidity(assets, buffer);
         // 2.6. Check allocation-aware limit
         {
             uint256 allocated = userTotalAllocated[_owner];
-            uint256 ownerAssets = this.convertToAssets(balanceOf[_owner]);
+            uint256 ownerAssets = _convertToAssets(balanceOf[_owner]);
             uint256 unallocated = ownerAssets > allocated ? ownerAssets - allocated : 0;
             if (assets > unallocated) revert dBank__InsufficientUnallocated(assets, unallocated);
         }
@@ -378,7 +395,7 @@ contract dBank {
 
         // Check that post-transfer assets still cover allocations
         uint256 remainingShares = balanceOf[_from] - _amount;
-        uint256 remainingAssets = this.convertToAssets(remainingShares);
+        uint256 remainingAssets = _convertToAssets(remainingShares);
         uint256 allocated = userTotalAllocated[_from];
         if (remainingAssets < allocated) {
             revert dBank__AllocationTransferRestriction(remainingAssets, allocated);
@@ -416,16 +433,16 @@ contract dBank {
         if (block.timestamp < lastEpochTimeStamp + EPOCH_DURATION) {
             revert dBank__EpochNotComplete();
         }
-        
-        uint256 _totalAssets = this.totalAssets();
+
+        uint256 ta = _totalAssets();
         uint256 _totalSupply = totalSupply;
-        
+
         if (_totalSupply == 0) {
             lastEpochTimeStamp = block.timestamp;
             return;
         }
-        
-        uint256 currentPricePerShare = (_totalAssets * SCALE) / _totalSupply;
+
+        uint256 currentPricePerShare = (ta * SCALE) / _totalSupply;
         uint256 gain = 0;
         
         if (currentPricePerShare > highWaterMark) {
@@ -453,7 +470,7 @@ contract dBank {
         if (totalSupply == 0) {
             return SCALE; // 1:1 initial
         }
-        return (this.totalAssets() * SCALE) / totalSupply;
+        return (_totalAssets() * SCALE) / totalSupply;
     }
 
     //===========================================================
@@ -548,7 +565,7 @@ contract dBank {
         if (_amount == 0) revert dBank__InvalidAmount();
 
         // Check unallocated >= amount
-        uint256 ownerAssets = this.convertToAssets(balanceOf[msg.sender]);
+        uint256 ownerAssets = _convertToAssets(balanceOf[msg.sender]);
         uint256 allocated = userTotalAllocated[msg.sender];
         uint256 unallocated = ownerAssets > allocated ? ownerAssets - allocated : 0;
         if (_amount > unallocated) revert dBank__InsufficientUnallocated(_amount, unallocated);
@@ -635,7 +652,7 @@ contract dBank {
     }
 
     function getUnallocated(address _user) external view returns (uint256) {
-        uint256 ownerAssets = this.convertToAssets(balanceOf[_user]);
+        uint256 ownerAssets = _convertToAssets(balanceOf[_user]);
         uint256 allocated = userTotalAllocated[_user];
         return ownerAssets > allocated ? ownerAssets - allocated : 0;
     }
@@ -688,8 +705,8 @@ contract dBank {
     //===========================================================
 
     function _updateBuffer() internal {
-        uint256 _totalAssets = this.totalAssets();
-        uint256 targetBuffer = (_totalAssets * bufferTargetBps) / MAX_BPS;
+        uint256 ta = _totalAssets();
+        uint256 targetBuffer = (ta * bufferTargetBps) / MAX_BPS;
         uint256 oldBuffer = buffer;
 
         if (buffer < targetBuffer) {
