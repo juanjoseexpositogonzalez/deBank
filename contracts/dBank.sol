@@ -574,8 +574,10 @@ contract dBank {
 
     /**
      * @notice Unallocate assets from a strategy back to buffer on behalf of a user
+     * @dev Allows withdrawing up to the current value (principal + yield).
+     *      Tracking is reduced by min(_amount, tracked principal).
      * @param _strategyId The strategy ID to unallocate from
-     * @param _amount The amount of assets to unallocate
+     * @param _amount The amount of assets to unallocate (can include yield)
      * @param _maxSlippageBps Maximum slippage in basis points
      * @return The amount actually withdrawn
      */
@@ -583,14 +585,34 @@ contract dBank {
         if (_amount == 0) revert dBank__InvalidAmount();
 
         uint256 userAlloc = userStrategyAllocation[msg.sender][_strategyId];
-        if (_amount > userAlloc) revert dBank__InsufficientUnallocated(_amount, userAlloc);
+        if (userAlloc == 0) revert dBank__InsufficientUnallocated(_amount, 0);
 
-        // Effects: update tracking
-        userStrategyAllocation[msg.sender][_strategyId] -= _amount;
-        userTotalAllocated[msg.sender] -= _amount;
+        // Compute user's current value including yield
+        StrategyRouter router = StrategyRouter(strategyRouter);
+        uint256 routerAllocated = router.strategyAllocated(_strategyId);
+        uint256 userValue;
+        if (routerAllocated > 0) {
+            address strategyAddr = router.strategies(_strategyId);
+            (bool success, bytes memory data) = strategyAddr.staticcall(
+                abi.encodeWithSignature("totalAssets()")
+            );
+            require(success, "Strategy totalAssets call failed");
+            uint256 strategyTotalAssets = abi.decode(data, (uint256));
+            userValue = userAlloc * strategyTotalAssets / routerAllocated;
+        } else {
+            userValue = userAlloc;
+        }
+
+        if (_amount > userValue) revert dBank__InsufficientUnallocated(_amount, userValue);
+
+        // Effects: reduce tracking by min(_amount, principal)
+        // If withdrawing yield beyond principal, clear all tracking
+        uint256 principalToReduce = _amount >= userAlloc ? userAlloc : _amount;
+        userStrategyAllocation[msg.sender][_strategyId] -= principalToReduce;
+        userTotalAllocated[msg.sender] -= principalToReduce;
 
         // Interactions: withdraw from strategy via router (tokens come back to dBank)
-        uint256 withdrawn = StrategyRouter(strategyRouter).withdrawFromStrategy(_strategyId, _amount, _maxSlippageBps);
+        uint256 withdrawn = router.withdrawFromStrategy(_strategyId, _amount, _maxSlippageBps);
 
         // Update buffer with returned tokens
         uint256 oldBuffer = buffer;
