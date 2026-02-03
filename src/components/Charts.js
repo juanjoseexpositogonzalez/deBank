@@ -15,7 +15,8 @@ const Charts = () => {
     // Contract state
     const dBank = useSelector(state => state.dBank.contract);
     const strategyRouter = useSelector(state => state.strategyRouter.contract);
-    const symbols = useSelector(state => state.tokens.symbols) || [];
+    const symbolsRaw = useSelector(state => state.tokens.symbols);
+    const symbols = useMemo(() => symbolsRaw || [], [symbolsRaw]);
     
     // Strategy state for pie chart
     const strategiesRaw = useSelector(state => state.strategyRouter.strategies);
@@ -144,7 +145,7 @@ const Charts = () => {
             title: { text: 'Price per Share' }
         },
         title: {
-            text: 'Effective Price per Share Evolution',
+            text: 'Price per Share Evolution',
             style: { color: '#f8f9fa', fontSize: '16px' }
         },
         colors: ['#0dcaf0'],
@@ -310,7 +311,7 @@ const Charts = () => {
                                 />
                             ) : (
                                 <div>
-                                    <h5 style={{ color: '#f8f9fa', marginBottom: '20px' }}>Effective Price per Share Evolution</h5>
+                                    <h5 style={{ color: '#f8f9fa', marginBottom: '20px' }}>Price per Share Evolution</h5>
                                     <p style={{ color: '#adb5bd', textAlign: 'center', padding: '50px' }}>
                                         Current: {currentPps.toFixed(4)}
                                         <br />

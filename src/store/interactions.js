@@ -903,19 +903,28 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
             throw new Error(result.error || 'Deposit failed');
         }
 
-        // Dispatch success action
-        dispatch(depositSuccess({ hash: result.txHash, isX402: true }));
-        
-        console.log('x402 deposit successful:', result);
-        
-        // Esperar un poco para que la transacción se confirme antes de retornar
-        // Esto ayuda a que loadBalances obtenga los valores actualizados
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Wait for transaction to be mined before dispatching success
+        // This ensures loadBalances will get updated values
+        try {
+            const receipt = await provider.waitForTransaction(result.txHash, 1);
+            console.log('x402 deposit confirmed in block:', receipt.blockNumber);
+            // Small delay after confirmation to ensure RPC state is synced
+            await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (waitError) {
+            // If waitForTransaction fails, log but don't fail the deposit
+            // The transaction was submitted successfully, just confirmation tracking failed
+            console.warn('Could not confirm x402 transaction:', waitError.message);
+            // Wait longer if we couldn't confirm
+            await new Promise(resolve => setTimeout(resolve, 3000));
+        }
 
-        return { 
-            ok: true, 
+        // Now dispatch success - transaction is confirmed (or at least submitted)
+        dispatch(depositSuccess({ hash: result.txHash, isX402: true }));
+
+        return {
+            ok: true,
             txHash: result.txHash,
-            shares: result.shares 
+            shares: result.shares
         };
     } catch (error) {
         console.error('depositViaX402 error:', error);
@@ -1196,82 +1205,24 @@ export const loadChartData = async (provider, dBank, strategyRouter, account, di
         const userSharesBN = await dBank.balanceOf(account);
         const userShares = parseFloat(ethers.utils.formatUnits(userSharesBN, 18));
 
-        // Now calculate strategy allocations value
-        let allocatedValue = 0;
-
-        if (strategyRouter) {
-            try {
-                // Get total strategies
-                const totalStrategiesBN = await strategyRouter.totalStrategies();
-                const totalStrategies = totalStrategiesBN.toNumber();
-
-                // Iterate through strategies to get user allocations
-                for (let i = 1; i <= totalStrategies; i++) {
-                    try {
-                        const allocationBN = await dBank.getUserStrategyAllocation(account, i);
-                        if (allocationBN.gt(0)) {
-                            const allocationPrincipal = parseFloat(ethers.utils.formatUnits(allocationBN, 18));
-
-                            // Get current value of this allocation
-                            const [strategyAddr, , , strategyAllocatedBN] = await strategyRouter.getStrategy(i);
-
-                            if (strategyAddr && strategyAddr !== ethers.constants.AddressZero && strategyAllocatedBN.gt(0)) {
-                                try {
-                                    const strategy = new ethers.Contract(
-                                        strategyAddr,
-                                        ["function totalAssets() view returns (uint256)"],
-                                        provider
-                                    );
-                                    const strategyTotalAssetsBN = await strategy.totalAssets();
-
-                                    // User's share of strategy = (userAllocation / strategyAllocated) * strategyTotalAssets
-                                    const allocationValueBN = allocationBN.mul(strategyTotalAssetsBN).div(strategyAllocatedBN);
-                                    allocatedValue += parseFloat(ethers.utils.formatUnits(allocationValueBN, 18));
-                                } catch (strategyError) {
-                                    // If can't get strategy value, use principal as fallback
-                                    allocatedValue += allocationPrincipal;
-                                }
-                            } else {
-                                allocatedValue += allocationPrincipal;
-                            }
-                        }
-                    } catch (allocError) {
-                        // Strategy might not exist, continue
-                    }
-                }
-            } catch (routerError) {
-                console.warn('Error loading strategy allocations for charts:', routerError.message);
-            }
-        }
-
-        // Calculate total user value
-        // Vault shares are valued at shares * PPS (price per share)
-        // Strategy allocations are valued separately based on strategy totalAssets
-        const vaultValue = userShares * vaultPricePerShare;
-        const totalUserValue = vaultValue + allocatedValue;
-
-        // Calculate effective price per share for this user
-        const effectivePricePerShare = userShares > 0
-            ? totalUserValue / userShares
-            : vaultPricePerShare;
+        // Total user value = shares * PPS
+        // PPS already includes strategy assets (totalAssets = buffer + strategyAssets)
+        const totalUserValue = userShares * vaultPricePerShare;
 
         // Debug logging
         console.log('loadChartData:', {
             timestamp: new Date(currentTimestamp).toISOString(),
             vaultPPS: vaultPricePerShare.toFixed(6),
             userShares: userShares.toFixed(4),
-            vaultValue: vaultValue.toFixed(4),
-            allocatedValue: allocatedValue.toFixed(4),
             totalUserValue: totalUserValue.toFixed(4),
-            effectivePPS: effectivePricePerShare.toFixed(6),
         });
 
         // Dispatch current values
-        dispatch(setCurrentPricePerShare(effectivePricePerShare.toString()));
+        dispatch(setCurrentPricePerShare(vaultPricePerShare.toString()));
         dispatch(setCurrentUserSharesValue(totalUserValue.toString()));
 
         // Add points to history
-        dispatch(addPricePerSharePoint({ x: currentTimestamp, y: effectivePricePerShare }));
+        dispatch(addPricePerSharePoint({ x: currentTimestamp, y: vaultPricePerShare }));
         dispatch(addUserSharesValuePoint({ x: currentTimestamp, y: totalUserValue }));
 
     } catch (error) {
