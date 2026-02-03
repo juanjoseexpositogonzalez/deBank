@@ -571,18 +571,32 @@ export const loadDepositors = async (dBank, dispatch) => {
 
         const addressZero = '0x0000000000000000000000000000000000000000';
 
+        // Get current block and calculate a reasonable range
+        // MetaMask RPC has limitations on large block ranges
+        let fromBlock = 0;
+        try {
+            const currentBlock = await dBank.provider.getBlockNumber();
+            // Query last 50000 blocks (roughly 1-2 days on Base Sepolia)
+            fromBlock = Math.max(0, currentBlock - 50000);
+        } catch (blockError) {
+            console.warn('Could not get block number, using fromBlock=0');
+        }
+
         // Query Deposit events to find depositor addresses
         let depositEvents = [];
         try {
             const depositFilter = dBank.filters.Deposit();
-            depositEvents = await dBank.queryFilter(depositFilter);
+            depositEvents = await dBank.queryFilter(depositFilter, fromBlock, 'latest');
         } catch (filterError) {
-            console.warn('queryFilter failed, retrying with explicit block range:', filterError.message);
+            console.warn('Deposit queryFilter failed:', filterError.message);
+            // Try with smaller range
             try {
+                const currentBlock = await dBank.provider.getBlockNumber();
+                const smallerFromBlock = Math.max(0, currentBlock - 10000);
                 const depositFilter = dBank.filters.Deposit();
-                depositEvents = await dBank.queryFilter(depositFilter, 0, 'latest');
+                depositEvents = await dBank.queryFilter(depositFilter, smallerFromBlock, 'latest');
             } catch (retryError) {
-                console.error('Deposit queryFilter retry failed:', retryError.message);
+                console.warn('Deposit queryFilter retry failed, skipping event query');
             }
         }
 
@@ -590,14 +604,17 @@ export const loadDepositors = async (dBank, dispatch) => {
         let transferEvents = [];
         try {
             const transferFilter = dBank.filters.Transfer();
-            transferEvents = await dBank.queryFilter(transferFilter);
+            transferEvents = await dBank.queryFilter(transferFilter, fromBlock, 'latest');
         } catch (filterError) {
-            console.warn('Transfer queryFilter failed, retrying with explicit block range:', filterError.message);
+            console.warn('Transfer queryFilter failed:', filterError.message);
+            // Try with smaller range
             try {
+                const currentBlock = await dBank.provider.getBlockNumber();
+                const smallerFromBlock = Math.max(0, currentBlock - 10000);
                 const transferFilter = dBank.filters.Transfer();
-                transferEvents = await dBank.queryFilter(transferFilter, 0, 'latest');
+                transferEvents = await dBank.queryFilter(transferFilter, smallerFromBlock, 'latest');
             } catch (retryError) {
-                console.error('Transfer queryFilter retry failed:', retryError.message);
+                console.warn('Transfer queryFilter retry failed, skipping event query');
             }
         }
 
