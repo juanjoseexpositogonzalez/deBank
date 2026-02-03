@@ -903,19 +903,28 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
             throw new Error(result.error || 'Deposit failed');
         }
 
-        // Dispatch success action
-        dispatch(depositSuccess({ hash: result.txHash, isX402: true }));
-        
-        console.log('x402 deposit successful:', result);
-        
-        // Esperar un poco para que la transacción se confirme antes de retornar
-        // Esto ayuda a que loadBalances obtenga los valores actualizados
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Wait for transaction to be mined before dispatching success
+        // This ensures loadBalances will get updated values
+        try {
+            const receipt = await provider.waitForTransaction(result.txHash, 1);
+            console.log('x402 deposit confirmed in block:', receipt.blockNumber);
+            // Small delay after confirmation to ensure RPC state is synced
+            await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (waitError) {
+            // If waitForTransaction fails, log but don't fail the deposit
+            // The transaction was submitted successfully, just confirmation tracking failed
+            console.warn('Could not confirm x402 transaction:', waitError.message);
+            // Wait longer if we couldn't confirm
+            await new Promise(resolve => setTimeout(resolve, 3000));
+        }
 
-        return { 
-            ok: true, 
+        // Now dispatch success - transaction is confirmed (or at least submitted)
+        dispatch(depositSuccess({ hash: result.txHash, isX402: true }));
+
+        return {
+            ok: true,
             txHash: result.txHash,
-            shares: result.shares 
+            shares: result.shares
         };
     } catch (error) {
         console.error('depositViaX402 error:', error);
