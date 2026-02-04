@@ -761,8 +761,8 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
             throw new Error('x402 backend URL not configured for this network. Please check config.json and ensure x402.backendUrl is set for Base Sepolia.');
         }
 
-        console.log("REACT_APP_BACKEND_URL baked:", process.env.REACT_APP_BACKEND_URL);
-        console.log("Resolved backendUrl:", backendUrl);
+        // console.log("REACT_APP_BACKEND_URL baked:", process.env.REACT_APP_BACKEND_URL);
+        // console.log("Resolved backendUrl:", backendUrl);
 
 
         // Importar cliente x402 dinámicamente (puede no estar disponible aún)
