@@ -761,6 +761,10 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
             throw new Error('x402 backend URL not configured for this network. Please check config.json and ensure x402.backendUrl is set for Base Sepolia.');
         }
 
+        console.log("REACT_APP_BACKEND_URL baked:", process.env.REACT_APP_BACKEND_URL);
+        console.log("Resolved backendUrl:", backendUrl);
+
+
         // Importar cliente x402 dinámicamente (puede no estar disponible aún)
         let x402Client, wrapFetchWithPayment, registerExactEvmScheme;
         try {
@@ -865,8 +869,10 @@ export const depositViaX402 = async (provider, account, amount, dispatch, chainI
 
         // Hacer request al backend x402
         console.log('Making x402 deposit request to:', backendUrl);
+
+        const url = `${backendUrl.replace(/\/$/, "")}/api/x402/deposit`;
         
-        const response = await fetchWithPayment(`${backendUrl}/api/x402/deposit`, {
+        const response = await fetchWithPayment(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
