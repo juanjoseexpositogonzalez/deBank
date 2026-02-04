@@ -1,0 +1,15 @@
+# fly.toml app configuration file generated for facilitator on 2026-02-04T12:46:31+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'facilitator'
+primary_region = 'cdg'
+
+[build]
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
